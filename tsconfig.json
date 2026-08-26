@@ -3,10 +3,13 @@
     // ES2022 rather than a lower target: BigInt literals and `??=` are used
     // throughout, and every id in this schema is a bigint.
     "target": "ES2022",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "module": "esnext",
     "moduleResolution": "bundler",
-
     "strict": true,
     // Catches the class of bug this codebase is most exposed to: reading a
     // property off a row that Prisma typed as possibly-undefined.
@@ -14,7 +17,6 @@
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
-
     "allowJs": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -23,16 +25,31 @@
     "jsx": "preserve",
     "incremental": true,
     "noEmit": true,
-
-    "plugins": [{ "name": "next" }],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ]
     }
   },
   // next-env.d.ts is deliberately absent from `include` for now — Next.js
   // generates it on first `next dev`, and listing a file that doesn't exist
   // makes `tsc --noEmit` fail. It gets added when the app is scaffolded.
-  "include": ["src/**/*.ts", "src/**/*.tsx", "prisma/**/*.ts", "tests/**/*.ts", "*.ts"],
-  "exclude": ["node_modules", ".next"]
+  "include": [
+    "*.ts",
+    "prisma/**/*.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.ts",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next"
+  ]
 }

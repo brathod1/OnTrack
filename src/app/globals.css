@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    /* The app is used all day. Slightly tighter than browser default so more
+       rows fit on screen without shrinking text to an unreadable size. */
+    font-size: 15px;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+
+  /* Visible keyboard focus everywhere. The keyboard shortcuts in this app
+     (⌘K search, N new task, T timer) mean people genuinely navigate without a
+     mouse, and an invisible focus ring makes that impossible. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-blue-600 ring-offset-1;
+  }
+
+  /* Tabular numerals so hours and dates line up in columns. Without this,
+     "1:05" and "11:55" are different widths and the eye can't scan them. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

@@ -4,9 +4,9 @@
   "private": true,
   "description": "Internal task management for K C Mehta & Co LLP",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3100",
     "build": "prisma generate && next build",
-    "start": "next start",
+    "start": "next start -p 3100",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
