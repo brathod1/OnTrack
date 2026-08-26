@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import { UserStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { getCurrentOrganizationId } from "@/lib/org/current";
 import { authConfig } from "./auth.config";
 
 /**
@@ -111,12 +112,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         });
 
         if (!existing) {
+          // The new user joins the organisation this installation serves.
+          // Resolved rather than assumed — when a second organisation exists,
+          // this becomes a lookup by domain or invitation and nothing else
+          // in this callback changes.
+          const organizationId = await getCurrentOrganizationId();
+
           await prisma.user.create({
             data: {
               entraObjectId: oid,
               email,
               name: user.name ?? email,
               status: UserStatus.PENDING,
+              organizationId,
             },
           });
           return "/signin?error=pending_approval";

@@ -34,6 +34,7 @@ import { EngagementCapacity, Grade, Role, TaskStatus, UserStatus } from "@prisma
 import { prisma } from "@/lib/db";
 
 export interface Firm {
+  organizationId: bigint;
   users: {
     admin: bigint;
     priya: bigint;
@@ -66,8 +67,20 @@ export interface Firm {
 const DUE = new Date("2026-09-30T00:00:00.000Z");
 
 export async function buildFirm(): Promise<Firm> {
-  const tax = await prisma.team.create({ data: { name: "Direct Tax" } });
-  const audit = await prisma.team.create({ data: { name: "Statutory Audit" } });
+  // Everything hangs off one organisation. The fixture deliberately uses
+  // neutral settings rather than the CA firm's, so a test that accidentally
+  // depends on IST or on the word "Client" fails here rather than in
+  // production somewhere else.
+  const org = await prisma.organization.create({
+    data: { name: "Fixture Organisation", shortName: "FIX" },
+  });
+
+  const tax = await prisma.team.create({
+    data: { name: "Direct Tax", organizationId: org.id },
+  });
+  const audit = await prisma.team.create({
+    data: { name: "Statutory Audit", organizationId: org.id },
+  });
 
   const mk = (
     email: string,
@@ -84,6 +97,7 @@ export async function buildFirm(): Promise<Firm> {
         role,
         grade,
         status: UserStatus.ACTIVE,
+        organizationId: org.id,
         teamId: teamId ?? null,
         reportsToId: reportsToId ?? null,
       },
@@ -103,10 +117,16 @@ export async function buildFirm(): Promise<Firm> {
   const chandra = await mk("chandra@example.invalid", "Chandra Contractor", Role.MEMBER, Grade.EXECUTIVE);
 
   const clientA = await prisma.client.create({
-    data: { name: "Alpha Industries", code: "ALPHA", relationshipPartnerId: priya.id },
+    data: {
+      name: "Alpha Industries", code: "ALPHA",
+      organizationId: org.id, relationshipPartnerId: priya.id,
+    },
   });
   const clientB = await prisma.client.create({
-    data: { name: "Beta Traders", code: "BETA", relationshipPartnerId: quentin.id },
+    data: {
+      name: "Beta Traders", code: "BETA",
+      organizationId: org.id, relationshipPartnerId: quentin.id,
+    },
   });
 
   const engA1 = await prisma.engagement.create({
@@ -174,6 +194,7 @@ export async function buildFirm(): Promise<Firm> {
   });
 
   return {
+    organizationId: org.id,
     users: {
       admin: admin.id, priya: priya.id, quentin: quentin.id,
       meera: meera.id, nikhil: nikhil.id,

@@ -92,6 +92,7 @@ async function assertSafeToSeed() {
 }
 
 const TABLES = [
+  "organizations",
   "activity_log", "notifications", "time_entries", "task_contributors",
   "task_tags", "comments", "attachments", "tasks", "recurrence_instances",
   "recurrence_rules", "engagement_members", "engagements", "clients",
@@ -116,13 +117,57 @@ async function main() {
   await assertSafeToSeed();
   await wipe();
 
+  // ── The organisation ─────────────────────────────────────────────────────
+  //
+  // THIS IS WHERE THE CA FIRM LIVES. Everything below is configuration for one
+  // organisation, not behaviour of the software. Another organisation gets a
+  // different row here — different timezone, different vocabulary, different
+  // service lines — and runs the same engine.
+  //
+  // The application contains no `if (organisation is a CA firm)` anywhere. If
+  // it ever does, that is the bug this structure exists to prevent.
+  const org = await db.organization.create({
+    data: {
+      name: "Demo Chartered Accountants LLP",
+      shortName: "DemoCA",
+      timezone: "Asia/Kolkata",
+      dateFormat: "dd MMM yyyy",
+      weekStartsOn: 1,
+      workingDays: [1, 2, 3, 4, 5, 6], // Mon-Sat, as most Indian firms work
+      taskKeyPrefix: "TSK",
+      searchLanguage: "english",
+
+      // What this organisation calls things. A software company would set
+      // client → Customer and engagement → Project; nothing else changes.
+      terminology: {
+        client: { singular: "Client", plural: "Clients" },
+        engagement: { singular: "Engagement", plural: "Engagements" },
+        task: { singular: "Task", plural: "Tasks" },
+        subtask: { singular: "Subtask", plural: "Subtasks" },
+        review: { singular: "Review", verb: "Review" },
+        externalDeadline: { singular: "Statutory deadline", short: "Stat" },
+        team: { singular: "Team", plural: "Teams" },
+      },
+    },
+  });
+
+  console.log(`  Organisation: ${org.name}`);
+
   // ── Teams (service lines) ────────────────────────────────────────────────
+  // Configuration too. These are this firm's service lines, not categories the
+  // engine knows about.
   const [audit, directTax, gst, internalAudit, admin_] = await Promise.all([
-    db.team.create({ data: { name: "Statutory Audit" } }),
-    db.team.create({ data: { name: "Direct Tax" } }),
-    db.team.create({ data: { name: "Indirect Tax / GST" } }),
-    db.team.create({ data: { name: "Internal Audit & Risk" } }),
-    db.team.create({ data: { name: "Practice Administration", membersCanCreateTasks: false } }),
+    db.team.create({ data: { name: "Statutory Audit", organizationId: org.id } }),
+    db.team.create({ data: { name: "Direct Tax", organizationId: org.id } }),
+    db.team.create({ data: { name: "Indirect Tax / GST", organizationId: org.id } }),
+    db.team.create({ data: { name: "Internal Audit & Risk", organizationId: org.id } }),
+    db.team.create({
+      data: {
+        name: "Practice Administration",
+        organizationId: org.id,
+        membersCanCreateTasks: false,
+      },
+    }),
   ]);
 
   // ── People ───────────────────────────────────────────────────────────────
@@ -135,6 +180,7 @@ async function main() {
       data: {
         email, name, role, grade,
         status: UserStatus.ACTIVE,
+        organizationId: org.id,
         teamId: teamId ?? null,
         reportsToId: reportsToId ?? null,
       },
@@ -158,6 +204,7 @@ async function main() {
     data: {
       email: "newjoiner@demo.invalid", name: "Pending Newjoiner",
       role: Role.MEMBER, grade: Grade.EXECUTIVE, status: UserStatus.PENDING,
+      organizationId: org.id,
     },
   });
 
@@ -166,22 +213,35 @@ async function main() {
     data: {
       email: "former.staff@demo.invalid", name: "Former Staff",
       role: Role.MEMBER, grade: Grade.EXECUTIVE, status: UserStatus.INACTIVE,
+      organizationId: org.id,
       teamId: audit.id, reportsToId: rohit.id, deactivatedAt: hoursAgo(24 * 40),
     },
   });
 
   // ── Clients ──────────────────────────────────────────────────────────────
   const firmInternal = await db.client.create({
-    data: { name: "Firm — Internal", code: "INTERNAL", isInternal: true, relationshipPartnerId: aarti.id },
+    data: {
+      name: "Firm — Internal", code: "INTERNAL", isInternal: true,
+      organizationId: org.id, relationshipPartnerId: aarti.id,
+    },
   });
   const orchid = await db.client.create({
-    data: { name: "Orchid Textiles Pvt Ltd", code: "ORCHID", relationshipPartnerId: raghav.id, aliases: ["Orchid Mills"] },
+    data: {
+      name: "Orchid Textiles Pvt Ltd", code: "ORCHID", aliases: ["Orchid Mills"],
+      organizationId: org.id, relationshipPartnerId: raghav.id,
+    },
   });
   const vertex = await db.client.create({
-    data: { name: "Vertex Logistics Ltd", code: "VERTEX", relationshipPartnerId: sneha.id },
+    data: {
+      name: "Vertex Logistics Ltd", code: "VERTEX",
+      organizationId: org.id, relationshipPartnerId: sneha.id,
+    },
   });
   const meridian = await db.client.create({
-    data: { name: "Meridian Foods Pvt Ltd", code: "MERIDIAN", relationshipPartnerId: raghav.id },
+    data: {
+      name: "Meridian Foods Pvt Ltd", code: "MERIDIAN",
+      organizationId: org.id, relationshipPartnerId: raghav.id,
+    },
   });
 
   // ── Engagements ──────────────────────────────────────────────────────────

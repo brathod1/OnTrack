@@ -151,6 +151,64 @@ enum RecurrenceFrequency {
   ANNUAL
 }
 
+// ─────────────────────────────────────────────────── organisation & config
+
+/// The organisation using OnTrack.
+///
+/// ─────────────────────────────────────────────────────────────────────────
+/// CA-FIRST, CONFIGURABLE. This row is where anything that would otherwise be
+/// hardcoded to one firm lives: timezone, date format, task-key prefix, search
+/// language, and the vocabulary the UI uses.
+///
+/// There is one row today and the application assumes so. It is NOT a
+/// multi-tenant boundary — tasks are not filtered by organisation, and adding
+/// that later means adding an organizationId predicate to the permission
+/// kernel, not restructuring the schema. That is a deliberate deferral: the
+/// cost of doing it now is real and the benefit is zero while there is one
+/// organisation.
+///
+/// What this DOES buy immediately is that "Asia/Kolkata", "TSK-", "english"
+/// and the word "Client" stop being facts about the software.
+/// ─────────────────────────────────────────────────────────────────────────
+model Organization {
+  id        BigInt  @id @default(autoincrement())
+  name      String
+  shortName String? @map("short_name")
+  logoUrl   String? @map("logo_url")
+
+  /// IANA zone. Drives the day boundary for task keys, work dates and
+  /// "due today" — all of which were silently IST before this existed.
+  timezone String @default("Asia/Kolkata")
+  /// date-fns pattern for display. Indian firms read 26 Aug 2026, not 8/26/26.
+  dateFormat String @default("dd MMM yyyy") @map("date_format")
+  /// 1 = Monday. Drives "due this week".
+  weekStartsOn Int   @default(1) @map("week_starts_on")
+  /// ISO weekday numbers that are working days. Mon–Sat is common in India.
+  workingDays  Int[] @default([1, 2, 3, 4, 5, 6]) @map("working_days")
+
+  /// Prefix for human-quotable task keys: TSK-2026-00001.
+  taskKeyPrefix String @default("TSK") @map("task_key_prefix")
+  /// PostgreSQL text-search configuration for the search vector.
+  searchLanguage String @default("english") @map("search_language")
+
+  /// What this organisation calls things. Shape and defaults in
+  /// src/lib/org/terminology.ts. A CA firm keeps Client/Engagement; another
+  /// organisation sets Customer/Project without a schema change.
+  terminology Json @default("{}")
+  /// Everything else that is a setting rather than a column.
+  settings Json @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // Roles (step G3) and configurable statuses (step G4) attach here next.
+  users   User[]
+  teams   Team[]
+  clients Client[]
+
+  @@map("organizations")
+}
+
 // ───────────────────────────────────────────────────────────── people
 
 model User {
@@ -161,6 +219,9 @@ model User {
   role          Role       @default(MEMBER)
   grade         Grade      @default(EXECUTIVE)
   status        UserStatus @default(PENDING)
+
+  organizationId BigInt       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
 
   teamId BigInt? @map("team_id")
   team   Team?   @relation(fields: [teamId], references: [id])
@@ -198,6 +259,10 @@ model User {
 
   @@index([status, teamId])
   @@index([reportsToId])
+  // Declared so `prisma migrate` recognises the index the migration creates.
+  // PostgreSQL does not index foreign keys automatically, and an undeclared
+  // index is treated as drift to be dropped.
+  @@index([organizationId])
   @@map("users")
 }
 
@@ -208,11 +273,15 @@ model Team {
   headUserId            BigInt? @map("head_user_id")
   membersCanCreateTasks Boolean @default(true) @map("members_can_create_tasks")
 
+  organizationId BigInt       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   members     User[]
   engagements Engagement[]
 
+  @@index([organizationId])
   @@map("teams")
 }
 
@@ -231,6 +300,9 @@ model Client {
   isInternal Boolean @default(false) @map("is_internal")
   isActive   Boolean @default(true) @map("is_active")
 
+  organizationId BigInt       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
   relationshipPartnerId BigInt? @map("relationship_partner_id")
   relationshipPartner   User?   @relation("RelationshipPartner", fields: [relationshipPartnerId], references: [id])
 
@@ -240,6 +312,7 @@ model Client {
   engagements Engagement[]
 
   @@index([isActive, name])
+  @@index([organizationId])
   // Trigram index for fuzzy client-name matching ("meridan" → "Meridian").
   // Declared so Prisma recognises the index created in the migration.
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_clients_name_trgm")

@@ -11,6 +11,9 @@ import { prisma } from "@/lib/db";
 
 /** Every table, in no particular order — CASCADE handles the dependencies. */
 const TABLES = [
+  // Listed first for readability only — CASCADE handles the dependency order,
+  // and organizations is now the root every person, team and client hangs off.
+  "organizations",
   "activity_log",
   "notifications",
   "time_entries",
