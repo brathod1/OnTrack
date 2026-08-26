@@ -556,10 +556,110 @@ async function main() {
         cancelReason: s.cancelReason ?? null,
         reviewRound: s.reviewRound ?? 1,
         assignedAt: hoursAgo((s.startedDaysAgo ?? 1) * 24 + 12),
+        // Set explicitly. Left to default(now()) the row claims it was created
+        // seconds ago while its own history says eleven days — two different
+        // answers to the same question on one page.
+        createdAt: hoursAgo((s.startedDaysAgo ?? 1) * 24 + 12),
       },
     });
 
     created.set(s.title, task.id);
+
+    // ── Activity history ───────────────────────────────────────────────────
+    // The seed writes rows directly rather than going through createTask(),
+    // so it must write the history that the service would have written.
+    // Without this the detail page's timeline — the whole point of the
+    // activity log — is empty on every seeded task, and the demo shows a
+    // feature that looks broken rather than one that works.
+    const createdAt = hoursAgo((s.startedDaysAgo ?? 1) * 24 + 12);
+    const log = (
+      action: ActivityAction,
+      actedAt: Date,
+      extra: {
+        actorId?: bigint; field?: string;
+        oldValue?: unknown; newValue?: unknown; reason?: string;
+      } = {}
+    ) =>
+      db.activityLog.create({
+        data: {
+          taskId: task.id,
+          actorId: extra.actorId ?? s.createdById,
+          action,
+          field: extra.field ?? null,
+          oldValue: extra.oldValue === undefined ? undefined : JSON.parse(JSON.stringify(extra.oldValue)),
+          newValue: extra.newValue === undefined ? undefined : JSON.parse(JSON.stringify(extra.newValue)),
+          reason: extra.reason ?? null,
+          actedAt,
+        },
+      });
+
+    await log(ActivityAction.TASK_CREATED, createdAt);
+    await log(ActivityAction.TASK_ASSIGNED, createdAt, {
+      field: "assigneeId",
+      newValue: s.assigneeId.toString(),
+    });
+
+    if (s.startedDaysAgo) {
+      await log(ActivityAction.STATUS_CHANGED, hoursAgo(s.startedDaysAgo * 24), {
+        actorId: s.assigneeId,
+        field: "status",
+        oldValue: "ASSIGNED",
+        newValue: "IN_PROGRESS",
+      });
+    }
+
+    if (s.blockedReason) {
+      await log(ActivityAction.BLOCKED, hoursAgo(48), {
+        actorId: s.assigneeId,
+        field: "isBlocked",
+        oldValue: false,
+        newValue: true,
+        reason: s.blockedReason,
+      });
+    }
+
+    if ((s.reviewRound ?? 1) > 1 && s.reviewerId) {
+      await log(ActivityAction.SUBMITTED_FOR_REVIEW, hoursAgo(80), {
+        actorId: s.assigneeId,
+        field: "status",
+        oldValue: "IN_PROGRESS",
+        newValue: "REVIEW",
+      });
+      await log(ActivityAction.REVIEW_REJECTED, hoursAgo(72), {
+        actorId: s.reviewerId,
+        field: "status",
+        oldValue: "REVIEW",
+        newValue: "IN_PROGRESS",
+        reason: "Opening balances do not agree to last year's signed accounts.",
+      });
+    }
+
+    if (s.status === TaskStatus.REVIEW) {
+      await log(ActivityAction.SUBMITTED_FOR_REVIEW, hoursAgo(20), {
+        actorId: s.assigneeId,
+        field: "status",
+        oldValue: "IN_PROGRESS",
+        newValue: "REVIEW",
+      });
+    }
+
+    if (s.completedDaysAgo) {
+      await log(ActivityAction.TASK_COMPLETED, hoursAgo(s.completedDaysAgo * 24), {
+        actorId: s.reviewerId ?? s.assigneeId,
+        field: "status",
+        oldValue: "REVIEW",
+        newValue: "COMPLETED",
+      });
+    }
+
+    if (s.cancelReason) {
+      await log(ActivityAction.TASK_CANCELLED, hoursAgo(72), {
+        field: "status",
+        oldValue: "ASSIGNED",
+        newValue: "CANCELLED",
+        reason: s.cancelReason,
+      });
+    }
 
     for (const tagId of s.tagIds ?? []) {
       await db.taskTag.create({ data: { taskId: task.id, tagId } });
@@ -717,13 +817,21 @@ async function main() {
     ],
   });
 
-  // ── A little activity history ────────────────────────────────────────────
-  await db.activityLog.createMany({
-    data: [
-      { taskId: created.get("Deferred tax working")!, actorId: rohit.id, action: ActivityAction.REVIEW_REJECTED, reason: "Opening balances do not agree to signed accounts", actedAt: hoursAgo(72) },
-      { taskId: created.get("Verify closing stock valuation")!, actorId: divya.id, action: ActivityAction.BLOCKED, field: "isBlocked", oldValue: false, newValue: true, reason: "Awaiting stock count sheets", actedAt: hoursAgo(48) },
-      { taskId: created.get("GSTR-3B — July 2026")!, actorId: kavya.id, action: ActivityAction.PRIORITY_CHANGED, field: "priority", oldValue: "HIGH", newValue: "CRITICAL", actedAt: hoursAgo(28) },
-    ],
+  // ── Extra history the per-task loop cannot infer ─────────────────────────
+  // Creation, assignment, status changes, blocking, rejection and completion
+  // are all generated per task above. Only genuinely one-off events belong
+  // here — anything else appears twice on the timeline, which is exactly what
+  // happened with the rejection and the block before this was trimmed.
+  await db.activityLog.create({
+    data: {
+      taskId: created.get("GSTR-3B — July 2026")!,
+      actorId: kavya.id,
+      action: ActivityAction.PRIORITY_CHANGED,
+      field: "priority",
+      oldValue: "HIGH",
+      newValue: "CRITICAL",
+      actedAt: hoursAgo(28),
+    },
   });
 
   // ── Firm-wide saved views ────────────────────────────────────────────────

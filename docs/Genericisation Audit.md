@@ -1,7 +1,30 @@
 # OnTrack — Genericisation Audit
 
 **Question asked:** is OnTrack a CA-firm application, or a task engine currently configured for a CA firm?
-**Date:** 26 August 2026 · **Against commit:** `de1aced` (Stage 7 complete)
+**Date:** 26 August 2026 · **Audited at:** `de1aced` · **Completed at:** `eb570a8`
+
+---
+
+## STATUS — five of six done
+
+| Step | Commit | Outcome |
+|---|---|---|
+| **G1** Organization entity | `cfea0fa` | Name, logo, timezone, date format, working week, key prefix, search language, terminology. Users/teams/clients scoped to it. |
+| **G2** Constants → configuration | `50619ce` | `next_task_key()` and the search trigger read the organisation. The hardcoded `Asia/Kolkata` was a real bug: task-key years were computed in IST wherever the organisation actually is. |
+| **G3** Capability-based permissions | `a9dc976` | Roles are rows. **No role name is compared anywhere in the kernel.** |
+| **G5** Generic vocabulary | `be5ef0a` | `external_deadline`, `EXTERNAL_FIXED`/`COMMITTED`, grade as free text. |
+| **G6** UI terminology | `eb570a8` | Nav, badges and form labels read from configuration. Two runnable example configurations. |
+| **G4** Configurable statuses | — | **Deferred.** Design settled (§6); migration stays mechanical while all status logic funnels through `transitions.ts`. |
+
+**Verified by demonstration, not assertion:**
+
+- `JOB-2026-00027` then `TSK-2026-00028` — same function, prefix changed in the database
+- Nav reading **Customers**, badges reading **SLA**, after one `UPDATE` to `terminology`
+- 156 tests green throughout
+
+**One security regression caught during the work.** `view.all_tasks` was granted to Partner on the assumption it meant "may open the All Tasks screen". It actually bypasses `visibleTaskFilter` entirely, so every partner could read every other partner's client portfolio — a confidentiality breach with no error, no crash and no visible symptom. Three Stage-3 visibility tests caught it in under a second. Split into `view.all_tasks` (administrators, unrestricted) and `view.portfolio` (screen gate, still relationship-filtered), with a migration guard that refuses to complete if any non-administrator role holds the bypass.
+
+---
 
 ---
 
