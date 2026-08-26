@@ -16,6 +16,7 @@ import {
   ReworkFlag,
   StatusBadge,
 } from "@/components/task-ui";
+import { TaskActions } from "@/components/task-actions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -130,26 +131,29 @@ export default async function TaskDetailPage({ params }: Params) {
         </div>
 
         {/*
-          Actions the caller may take, computed by the permission kernel.
-          Rendered disabled in this stage so the page's shape does not change
-          when Stage 9 wires them up — and so it is obvious now whether the
-          right buttons appear for the right people.
+          Actions the caller may take, computed by the permission kernel. The
+          component renders exactly this list and makes no judgement of its
+          own — and every mutation re-checks server-side anyway, so a client
+          that ignored it would gain nothing.
+
+          `version` is the optimistic lock: the updatedAt the page was
+          rendered from. A write against a stale one is refused with a 409,
+          and the user is offered a reload rather than a silent retry.
         */}
-        {transitions.length > 0 && (
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            {transitions.map((t) => (
-              <button
-                key={t.to}
-                disabled
-                title="Available in Stage 9"
-                className="cursor-not-allowed rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-500 opacity-60"
-              >
-                {t.label}
-              </button>
-            ))}
-            <span className="text-xs text-slate-400">actions arrive in Stage 9</span>
-          </div>
-        )}
+        <TaskActions
+          taskKey={task.displayKey}
+          version={task.updatedAt.toISOString()}
+          transitions={transitions.map((t) => ({
+            to: t.to,
+            label: t.label,
+            requiresReason: t.requiresReason,
+          }))}
+          canManage={canManage}
+          isBlocked={task.isBlocked}
+          blockedReason={task.blockedReason}
+          // Blocking a finished task means nothing; the server refuses it too.
+          canBlock={!closed && (canManage || task.assignee.id === actor.id)}
+        />
       </header>
 
       <div className="mt-6 grid gap-6 md:grid-cols-3">
