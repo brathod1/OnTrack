@@ -18,6 +18,8 @@ import {
   StatusBadge,
   SubtaskCount,
 } from "@/components/task-ui";
+import { QuickCreate } from "@/components/quick-create";
+import { getCreateOptions } from "@/lib/tasks/create-options";
 
 export const metadata: Metadata = { title: "My work" };
 export const runtime = "nodejs";
@@ -41,18 +43,24 @@ export const dynamic = "force-dynamic";
  */
 export default async function MyWorkPage() {
   const actor = await requireActingUser();
-  const { bands, counts } = await getMyWork(actor);
+  const [{ bands, counts }, createOptions] = await Promise.all([
+    getMyWork(actor),
+    getCreateOptions(actor),
+  ]);
 
   return (
     <main>
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">My work</h1>
-          <p className="mt-0.5 text-sm text-slate-600">
-            {counts.total === 0
-              ? "Nothing on your plate."
-              : `${counts.total} open ${counts.total === 1 ? "task" : "tasks"}`}
-          </p>
+        <div className="flex items-center gap-4">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight">My work</h1>
+            <p className="mt-0.5 text-sm text-slate-600">
+              {counts.total === 0
+                ? "Nothing on your plate."
+                : `${counts.total} open ${counts.total === 1 ? "task" : "tasks"}`}
+            </p>
+          </div>
+          <QuickCreate options={createOptions} />
         </div>
 
         {counts.total > 0 && (
