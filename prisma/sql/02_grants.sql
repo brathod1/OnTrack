@@ -1,65 +1,98 @@
--- OnTrack — database roles and grants.
--- Run ONCE as the database owner, after the first migration.
+-- ═══════════════════════════════════════════════════════════════════════════
+-- OnTrack — 02_grants.sql
 --
--- The point of this file: the activity log must be append-only, and the
--- cheapest honest way to guarantee that is to withhold UPDATE and DELETE from
--- the role the application connects as. Application-level "we never update it"
--- is a convention; this is a guarantee.
+-- WHEN TO RUN: AFTER the Prisma migration has created the tables. Re-run after
+--              any migration that adds a table (or rely on the ALTER DEFAULT
+--              PRIVILEGES block at the end, which covers future tables).
+-- RUN AS:      the postgres superuser, connected to the `ontrack` database.
+-- DESTRUCTIVE: no. Grants and revokes privileges. Touches no data.
+--
+--   psql -U postgres -h localhost -d ontrack -f prisma/sql/02_grants.sql
+--
+-- ── Why this file exists ───────────────────────────────────────────────────
+-- The activity log must be append-only. "The application never updates it" is
+-- a convention that survives exactly until someone writes a well-meaning
+-- cleanup script. Withholding UPDATE and DELETE from the role the application
+-- connects as is a guarantee the database enforces.
+--
+-- The same reasoning covers time entries, tasks, comments and users: deletion
+-- is a soft flag with a reason, so a stray `prisma.task.delete()` should fail
+-- loudly in development rather than quietly destroy a week of someone's work
+-- in production.
+--
+-- NOTE: this file previously also created roles and assumed the tables already
+-- existed. Role creation now lives in 00_roles.sql, which runs BEFORE the
+-- migration. This file runs AFTER it. The ordering matters — the REVOKE
+-- statements below fail if the tables do not yet exist.
+-- ═══════════════════════════════════════════════════════════════════════════
 
--- ── 1. The application role ────────────────────────────────────────────────
--- The app connects as ontrack_app, NOT as the database owner. Migrations run
--- separately as the owner (a different DATABASE_URL in CI).
+-- ── 1. Connection and schema access ────────────────────────────────────────
 
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ontrack_app') THEN
-    CREATE ROLE ontrack_app LOGIN PASSWORD 'set-me-from-key-vault';
-  END IF;
-END
-$$;
+-- PostgreSQL grants CONNECT to PUBLIC on every new database, which means any
+-- role that can log in to the server can reach this one. Revoke that first, so
+-- connection is by explicit grant only.
+REVOKE CONNECT ON DATABASE ontrack FROM PUBLIC;
 
-GRANT CONNECT ON DATABASE ontrack TO ontrack_app;
-GRANT USAGE  ON SCHEMA public     TO ontrack_app;
+GRANT CONNECT ON DATABASE ontrack TO ontrack_owner, ontrack_app, ontrack_readonly;
+GRANT USAGE  ON SCHEMA   public   TO ontrack_app, ontrack_readonly;
 
--- Full DML on the working tables.
-GRANT SELECT, INSERT, UPDATE, DELETE
-  ON ALL TABLES IN SCHEMA public TO ontrack_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ontrack_app;
+-- The migration role owns everything in the schema.
+GRANT ALL ON SCHEMA public TO ontrack_owner;
 
--- ── 2. Append-only activity log ────────────────────────────────────────────
+-- ── 2. Baseline DML for the application ────────────────────────────────────
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA public TO ontrack_app;
+GRANT USAGE, SELECT                  ON ALL SEQUENCES IN SCHEMA public TO ontrack_app;
+
+-- ── 3. Append-only activity log ────────────────────────────────────────────
+
 REVOKE UPDATE, DELETE, TRUNCATE ON activity_log FROM ontrack_app;
-GRANT  SELECT, INSERT            ON activity_log TO   ontrack_app;
+GRANT  SELECT, INSERT           ON activity_log TO   ontrack_app;
 
--- ── 3. Time entries are never hard-deleted ─────────────────────────────────
--- Deletion is a soft flag with a reason. Removing DELETE means a stray
--- `prisma.timeEntry.delete()` fails loudly in development rather than
--- quietly destroying somebody's week in production.
+-- ── 4. Tables where deletion is always soft ────────────────────────────────
+
 REVOKE DELETE, TRUNCATE ON time_entries FROM ontrack_app;
+REVOKE DELETE, TRUNCATE ON tasks        FROM ontrack_app;
+REVOKE DELETE, TRUNCATE ON comments     FROM ontrack_app;
+REVOKE DELETE, TRUNCATE ON users        FROM ontrack_app;
 
--- Same reasoning for the work record itself.
-REVOKE DELETE, TRUNCATE ON tasks    FROM ontrack_app;
-REVOKE DELETE, TRUNCATE ON comments FROM ontrack_app;
-REVOKE DELETE, TRUNCATE ON users    FROM ontrack_app;
-
--- Join rows genuinely are removable — nothing is lost by unlinking a tag.
+-- Join rows genuinely are removable — nothing is lost by unlinking a tag or
+-- removing a contributor, and both are recorded in the activity log anyway.
 GRANT DELETE ON task_tags, task_contributors, engagement_members TO ontrack_app;
 
--- ── 4. Defaults for tables added by future migrations ──────────────────────
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
+-- Notifications are ephemeral; clearing them destroys no record of work.
+GRANT DELETE ON notifications TO ontrack_app;
+
+-- ── 5. Defaults for tables added by future migrations ──────────────────────
+-- FOR ROLE ontrack_owner is essential: default privileges apply only to
+-- objects created BY the named role. Migrations run as ontrack_owner, so
+-- without this clause new tables would arrive with no grants for the app and
+-- the application would start failing on a table it had never heard of.
+
+ALTER DEFAULT PRIVILEGES FOR ROLE ontrack_owner IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ontrack_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
+
+ALTER DEFAULT PRIVILEGES FOR ROLE ontrack_owner IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO ontrack_app;
 
--- ── 5. Read-only role for reporting / Power BI (later phase) ───────────────
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ontrack_readonly') THEN
-    CREATE ROLE ontrack_readonly LOGIN PASSWORD 'set-me-from-key-vault';
-  END IF;
-END
-$$;
+ALTER DEFAULT PRIVILEGES FOR ROLE ontrack_owner IN SCHEMA public
+  GRANT SELECT ON TABLES TO ontrack_readonly;
 
-GRANT CONNECT ON DATABASE ontrack TO ontrack_readonly;
-GRANT USAGE   ON SCHEMA public    TO ontrack_readonly;
-GRANT SELECT  ON ALL TABLES IN SCHEMA public TO ontrack_readonly;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ontrack_readonly;
+-- ── 6. Read-only role (reporting, later phases) ────────────────────────────
+
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO ontrack_readonly;
+
+-- ── 7. Verification ────────────────────────────────────────────────────────
+-- Prints the privileges that matter. Expect for ontrack_app:
+--   activity_log  -> INSERT, SELECT   (and nothing else)
+--   time_entries  -> INSERT, SELECT, UPDATE
+--   tasks         -> INSERT, SELECT, UPDATE
+
+SELECT table_name,
+       string_agg(privilege_type, ', ' ORDER BY privilege_type) AS privileges
+  FROM information_schema.table_privileges
+ WHERE grantee = 'ontrack_app'
+   AND table_name IN ('activity_log', 'time_entries', 'tasks', 'comments',
+                      'users', 'task_tags', 'notifications')
+ GROUP BY table_name
+ ORDER BY table_name;

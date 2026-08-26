@@ -30,8 +30,18 @@ Requires Node 20+ and PostgreSQL 15+.
 ```powershell
 cd "D:\Data Backup\OnTrack"
 npm install
-Copy-Item .env.example .env.local     # then fill in the values
+npm approve-scripts @prisma/client @prisma/engines esbuild prisma unrs-resolver
+npm install                            # re-run so the approved scripts execute
+Copy-Item .env.example .env            # then fill in the values
 ```
+
+> **`.env`, not `.env.local`.** The Prisma CLI reads `.env` only. Next.js reads
+> both. Using `.env.local` gives you a working Next.js app and migrations that
+> fail with "Environment variable not found: DATABASE_URL".
+
+> **npm 11 blocks install scripts by default.** Without approving the five
+> packages above, Prisma's engine binaries are never downloaded and every
+> Prisma command fails with a confusing engine error.
 
 Create the database and roles:
 
@@ -69,6 +79,79 @@ The single-running-timer rule is a partial unique index because application chec
 
 **3. Time data is for planning, never for scoring people.**
 `originalEstimateMinutes` freezes at the first time entry so Estimated-vs-Actual compares like with like. There is no screen that ranks people by estimate accuracy or hours logged, and none will be added. This is a design constraint, not an oversight: score estimates and everyone pads them, and within a quarter the data — and the capacity planning that depends on it — is worthless.
+
+---
+
+## Database and migrations
+
+### The SQL files
+
+| File | When to run | As |
+|---|---|---|
+| `prisma/sql/00_roles.sql` | Once per environment, **before** the first migration | `postgres` |
+| `prisma/sql/01_constraints.sql` | **Never** — a pointer. The constraints live inside the initial migration | — |
+| `prisma/sql/02_grants.sql` | **After** each migration that adds tables | `postgres` |
+| `prisma/sql/03_verify.sql` | After any migration, in every environment | `ontrack_owner` |
+| `prisma/sql/04_timer_tests.sql` | Any time — runs in a transaction and rolls back | `ontrack_owner` |
+| `prisma/sql/05_concurrency_setup.sql` | Before the two-session test. **Commits** | `ontrack_owner` |
+| `prisma/sql/06_concurrency_cleanup.sql` | After it. Removes only the `ZZ-` test fixtures | `ontrack_owner` |
+
+### Setting up a fresh environment
+
+```powershell
+psql -U postgres -h localhost -d postgres -f "prisma\sql\00_roles.sql"
+psql -U postgres -h localhost -d postgres -c "CREATE DATABASE ontrack OWNER ontrack_owner ENCODING 'UTF8';"
+psql -U postgres -h localhost -d postgres      # then: \password ontrack_owner, \password ontrack_app, \q
+# fill in .env
+npx prisma migrate deploy
+psql -U postgres      -h localhost -d ontrack -f "prisma\sql\02_grants.sql"
+psql -U ontrack_owner -h localhost -d ontrack -f "prisma\sql\03_verify.sql"
+```
+
+### Adding constraints in a later migration
+
+Never edit an applied migration — it is history, and editing it breaks the checksum
+for every environment that has already run it.
+
+```powershell
+npx prisma migrate dev --name add_x --create-only   # 1. generate, don't apply
+#                                                     2. write your SQL into the new file
+npx prisma migrate dev                              # 3. apply
+npx prisma migrate diff --from-schema-datasource prisma/schema.prisma `
+                       --to-schema-datamodel   prisma/schema.prisma --script
+#                                                     4. must print "empty migration"
+```
+
+**Step 4 is not optional.** Any database object Prisma can't see in `schema.prisma`
+is treated as drift, and the next `prisma migrate dev` will offer to DROP it. That
+is why `Task.searchVector` is declared as `Unsupported("tsvector")` and why
+`TaskKeyCounter` exists as a model — neither is written by Prisma Client; both are
+declared purely so migrations leave them alone.
+
+---
+
+## Outstanding verification
+
+- **Timer concurrency under true parallelism.** `04_timer_tests.sql` proves the
+  constraint rejects a second running timer, and manual two-session testing
+  confirmed the rejection — but not the *blocking* behaviour while two
+  transactions are in flight, because coordinating two psql windows mid-
+  transaction proved unreliable. **To be covered by an automated two-connection
+  race test in Stage 3.** The guarantee itself rests on the partial unique index,
+  which is verified present with the correct predicate by `03_verify.sql` §3.
+
+---
+
+## Known technical debt
+
+- **`package.json#prisma` is deprecated.** Prisma 6.19 warns that the `prisma.seed`
+  key moves to a `prisma.config.ts` file and is removed in Prisma 7. It works on
+  6.x. Deliberately not migrated yet — the config file also changes how the
+  schema and `.env` are located, and that risk isn't worth taking to silence a
+  warning. **Must be resolved before upgrading to Prisma 7.**
+- **7 npm audit findings** (3 moderate, 4 high) at time of install, all in
+  transitive dependencies. To be reviewed properly at Stage 16 hardening.
+  `npm audit fix --force` is not the answer — it performs major-version upgrades.
 
 ---
 

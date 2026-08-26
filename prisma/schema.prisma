@@ -1,12 +1,18 @@
 // OnTrack — Task Management Core
-// Phase 1 schema. Scope per "OnTrack — Task Core Build Spec.md".
+// Phase 1 schema. Scope per "docs/OnTrack — Task Core Build Spec.md".
 //
 // Conventions:
-//   - Money/duration are integers in minutes. Never floats for time.
-//   - Dates that mean "a calendar day" are @db.Date, not DateTime.
-//   - Nothing is hard-deleted except join rows (task_tags, task_contributors).
-//   - The application DB role must have INSERT/SELECT only on activity_log.
-//     See prisma/sql/01_grants.sql
+//   - Durations are integers in MINUTES. Never floats, never seconds.
+//   - An INSTANT is @db.Timestamptz(3) — timestamp WITH time zone. Prisma's
+//     default (TIMESTAMP(3), no zone) is internally consistent but silently
+//     wrong to anything reading the database directly: pgAdmin, a SQL report,
+//     Power BI. Being explicit costs nothing and removes a whole class of bug.
+//   - A CALENDAR DAY is @db.Date. `work_date` is the day work happened, not an
+//     instant: Friday's work logged on Monday stays dated Friday, and no
+//     report shifts across a UTC boundary.
+//   - Nothing is hard-deleted except join rows.
+//   - The app DB role has INSERT/SELECT only on activity_log. See
+//     prisma/sql/02_grants.sql.
 
 generator client {
   provider = "prisma-client-js"
@@ -14,7 +20,18 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+
+  // Two URLs, two roles — this is what makes the restricted grants real.
+  //
+  //   url       → ontrack_app.   Prisma Client at runtime. Cannot UPDATE or
+  //               DELETE activity_log, cannot DELETE tasks or time entries.
+  //   directUrl → ontrack_owner. Prisma Migrate, db push/pull, Studio. Owns
+  //               the schema; holds CREATEDB for the shadow database.
+  //
+  // Without this split, migrations would run as the application role — which
+  // would mean granting the app the very privileges the grants file withholds.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
 }
 
 // ───────────────────────────────────────────────────────────── enums
@@ -56,7 +73,8 @@ enum EngagementStatus {
   CLOSED
 }
 
-/// Blocked is deliberately NOT here — it is a flag on Task.
+/// Blocked is deliberately NOT here — it is a flag on Task, so a blocked task
+/// keeps its real workflow position.
 enum TaskStatus {
   ASSIGNED
   IN_PROGRESS
@@ -72,9 +90,8 @@ enum Priority {
   LOW
 }
 
-/// Drives escalation severity and whether a manager may push the date.
 enum DueDateType {
-  STATUTORY // fixed by law; cannot be moved except by Admin with reason
+  STATUTORY // fixed by law; movable only by Admin, with a reason
   CLIENT_COMMITTED
   INTERNAL
 }
@@ -148,37 +165,36 @@ model User {
   teamId BigInt? @map("team_id")
   team   Team?   @relation(fields: [teamId], references: [id])
 
-  // Line management. Kept as a simple pointer: reporting-line *history* is
-  // out of scope this phase (see Build Spec §2). Known limitation: historical
-  // team reports follow the current line, not the line as at the time.
+  // Line management. Reporting-line HISTORY is out of scope this phase (Build
+  // Spec §2). Known limitation: historical team reports follow the current
+  // line, not the line as at the time.
   reportsToId BigInt? @map("reports_to_id")
   reportsTo   User?   @relation("LineManagement", fields: [reportsToId], references: [id])
   reports     User[]  @relation("LineManagement")
 
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-  deactivatedAt DateTime? @map("deactivated_at")
-  lastSeenAt    DateTime? @map("last_seen_at")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deactivatedAt DateTime? @map("deactivated_at") @db.Timestamptz(3)
+  lastSeenAt    DateTime? @map("last_seen_at") @db.Timestamptz(3)
 
-  // relations
-  tasksAssigned      Task[]              @relation("Assignee")
-  tasksCreated       Task[]              @relation("Creator")
-  tasksAssignedBy    Task[]              @relation("Assigner")
-  tasksReviewing     Task[]              @relation("Reviewer")
+  tasksAssigned      Task[]            @relation("Assignee")
+  tasksCreated       Task[]            @relation("Creator")
+  tasksAssignedBy    Task[]            @relation("Assigner")
+  tasksReviewing     Task[]            @relation("Reviewer")
   contributions      TaskContributor[]
-  contributionsAdded TaskContributor[]   @relation("ContributorAddedBy")
+  contributionsAdded TaskContributor[] @relation("ContributorAddedBy")
   engagements        EngagementMember[]
-  timeEntries        TimeEntry[]         @relation("TimeEntryOwner")
-  timeEntriesEdited  TimeEntry[]         @relation("TimeEntryEditor")
+  timeEntries        TimeEntry[]       @relation("TimeEntryOwner")
+  timeEntriesEdited  TimeEntry[]       @relation("TimeEntryEditor")
   comments           Comment[]
   attachments        Attachment[]
   activity           ActivityLog[]
   notifications      Notification[]
   savedViews         SavedView[]
-  clientsOwned       Client[]            @relation("RelationshipPartner")
-  engagementsLed     Engagement[]        @relation("EngagementPartner")
-  engagementsManaged Engagement[]        @relation("EngagementManager")
-  recurrenceDefaults RecurrenceRule[]    @relation("RecurrenceDefaultAssignee")
+  clientsOwned       Client[]          @relation("RelationshipPartner")
+  engagementsLed     Engagement[]      @relation("EngagementPartner")
+  engagementsManaged Engagement[]      @relation("EngagementManager")
+  recurrenceDefaults RecurrenceRule[]  @relation("RecurrenceDefaultAssignee")
 
   @@index([status, teamId])
   @@index([reportsToId])
@@ -192,7 +208,7 @@ model Team {
   headUserId            BigInt? @map("head_user_id")
   membersCanCreateTasks Boolean @default(true) @map("members_can_create_tasks")
 
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   members     User[]
   engagements Engagement[]
@@ -200,15 +216,16 @@ model Team {
   @@map("teams")
 }
 
-// ───────────────────────────────────────────────────── clients & engagements
-// Present to give tasks context and to make reporting useful. Deliberately
-// thin: no budgets, no billing, no financials (Build Spec §2).
+// ───────────────────────────────────────────────── clients & engagements
+// Present to give tasks context and make reporting useful. Deliberately thin:
+// no budgets, no billing, no financials (Build Spec §2).
 
 model Client {
-  id       BigInt   @id @default(autoincrement())
-  name     String
-  code     String   @unique
-  aliases  String[] @default([])
+  id      BigInt   @id @default(autoincrement())
+  name    String
+  code    String   @unique
+  aliases String[] @default([])
+
   /// The "Firm — Internal" pseudo-client, so non-client work still has an
   /// engagement and there is exactly one code path.
   isInternal Boolean @default(false) @map("is_internal")
@@ -217,12 +234,15 @@ model Client {
   relationshipPartnerId BigInt? @map("relationship_partner_id")
   relationshipPartner   User?   @relation("RelationshipPartner", fields: [relationshipPartnerId], references: [id])
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   engagements Engagement[]
 
   @@index([isActive, name])
+  // Trigram index for fuzzy client-name matching ("meridan" → "Meridian").
+  // Declared so Prisma recognises the index created in the migration.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_clients_name_trgm")
   @@map("clients")
 }
 
@@ -243,14 +263,14 @@ model Engagement {
   managerId BigInt? @map("manager_id")
   manager   User?   @relation("EngagementManager", fields: [managerId], references: [id])
 
-  /// Default for tasks created under this engagement; each task may override.
+  /// Default for tasks created here; each task may override.
   defaultReviewRequired Boolean @default(true) @map("default_review_required")
 
   startDate DateTime? @map("start_date") @db.Date
   endDate   DateTime? @map("end_date") @db.Date
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   members         EngagementMember[]
   tasks           Task[]
@@ -261,7 +281,7 @@ model Engagement {
   @@map("engagements")
 }
 
-/// The backbone of the visibility model: membership here grants task access
+/// The backbone of the visibility model: membership grants task access
 /// regardless of line management (Build Spec §4.5).
 model EngagementMember {
   id           BigInt             @id @default(autoincrement())
@@ -271,8 +291,8 @@ model EngagementMember {
   user         User               @relation(fields: [userId], references: [id])
   capacity     EngagementCapacity @default(MEMBER)
 
-  validFrom DateTime  @default(now()) @map("valid_from")
-  validTo   DateTime? @map("valid_to")
+  validFrom DateTime  @default(now()) @map("valid_from") @db.Timestamptz(3)
+  validTo   DateTime? @map("valid_to") @db.Timestamptz(3)
 
   @@unique([engagementId, userId, validFrom])
   @@index([userId, validTo])
@@ -282,8 +302,8 @@ model EngagementMember {
 // ───────────────────────────────────────────────────────────── tasks
 
 model Task {
-  id         BigInt @id @default(autoincrement())
-  /// Human-quotable, e.g. TSK-2026-04127. Generated by a sequence per year.
+  id BigInt @id @default(autoincrement())
+  /// Human-quotable, e.g. TSK-2026-00127. Generated by next_task_key().
   displayKey String @unique @map("display_key")
 
   title       String
@@ -292,8 +312,8 @@ model Task {
   engagementId BigInt     @map("engagement_id")
   engagement   Engagement @relation(fields: [engagementId], references: [id])
 
-  // Subtasks are rows in this table. Depth capped at 1 by a DB trigger
-  // (prisma/sql/02_constraints.sql) — parent_task_id must point at a root.
+  // Subtasks are rows in this table. Depth capped at 1 by a DB trigger — a
+  // service-layer check is one forgotten code path away from an infinite tree.
   parentTaskId BigInt? @map("parent_task_id")
   parentTask   Task?   @relation("Subtasks", fields: [parentTaskId], references: [id])
   subtasks     Task[]  @relation("Subtasks")
@@ -315,33 +335,31 @@ model Task {
   status   TaskStatus @default(ASSIGNED)
   priority Priority   @default(NORMAL)
 
-  // Blocked is a flag, not a status — so a blocked task keeps its real
-  // workflow position (Build Spec §5).
   isBlocked           Boolean   @default(false) @map("is_blocked")
   blockedReason       String?   @map("blocked_reason")
-  blockedSince        DateTime? @map("blocked_since")
+  blockedSince        DateTime? @map("blocked_since") @db.Timestamptz(3)
   expectedUnblockDate DateTime? @map("expected_unblock_date") @db.Date
 
   /// The internal commitment. Always present.
   dueDate     DateTime    @map("due_date") @db.Date
   dueDateType DueDateType @default(INTERNAL) @map("due_date_type")
-  /// Where the law fixes a date (GSTR-3B on the 20th). A manager may move
-  /// dueDate but never past this. Enforced in the service layer.
+  /// Where the law fixes a date. A manager may move dueDate but never past
+  /// this — enforced by a CHECK constraint, not just by the service layer.
   statutoryDueDate DateTime? @map("statutory_due_date") @db.Date
 
   /// Frozen at the first time entry so Estimated-vs-Actual compares like with
   /// like. Never used for individual scoring (Build Spec §6).
   originalEstimateMinutes Int? @map("original_estimate_minutes")
   currentEstimateMinutes  Int? @map("current_estimate_minutes")
-  /// Cache of SUM(time_entries.duration_minutes). Written in the same
-  /// transaction as the entry; reconciled nightly, drift reported not fixed.
-  actualMinutes           Int  @default(0) @map("actual_minutes")
+  /// Cache of SUM(time_entries.duration_minutes), written in the same
+  /// transaction. Reconciled nightly; drift is reported, not silently fixed.
+  actualMinutes Int @default(0) @map("actual_minutes")
 
-  assignedAt     DateTime  @default(now()) @map("assigned_at")
-  startedAt      DateTime? @map("started_at") // first move to IN_PROGRESS
-  completedAt    DateTime? @map("completed_at")
-  cancelledAt    DateTime? @map("cancelled_at")
-  cancelReason   String?   @map("cancel_reason")
+  assignedAt   DateTime  @default(now()) @map("assigned_at") @db.Timestamptz(3)
+  startedAt    DateTime? @map("started_at") @db.Timestamptz(3) // first IN_PROGRESS
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz(3)
+  cancelledAt  DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  cancelReason String?   @map("cancel_reason")
 
   reviewRound Int @default(1) @map("review_round") // rework counter
   reopenCount Int @default(0) @map("reopen_count")
@@ -349,9 +367,15 @@ model Task {
   recurrenceRuleId BigInt?         @map("recurrence_rule_id")
   recurrenceRule   RecurrenceRule? @relation(fields: [recurrenceRuleId], references: [id])
 
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at") // also optimistic lock
-  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3) // optimistic lock
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  /// Maintained by the tasks_build_search_vector() trigger in the initial
+  /// migration, never written by application code. `Unsupported` tells Prisma
+  /// the column exists and to leave it alone — without this declaration,
+  /// `prisma migrate dev` sees an unknown column and offers to DROP it.
+  searchVector Unsupported("tsvector")? @map("search_vector")
 
   contributors TaskContributor[]
   tags         TaskTag[]
@@ -360,15 +384,26 @@ model Task {
   timeEntries  TimeEntry[]
   activity     ActivityLog[]
 
-  // Query paths that matter: "my open work by due date", engagement boards,
-  // and the firm-wide overdue sweep.
   @@index([assigneeId, status, dueDate])
   @@index([engagementId, status])
   @@index([dueDate, status])
   @@index([reviewerId, status])
   @@index([parentTaskId])
   @@index([isBlocked, status])
+  // Declared so Prisma recognises the GIN indexes created in the migration.
+  @@index([searchVector(ops: raw("tsvector_ops"))], type: Gin, map: "idx_tasks_search")
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_tasks_title_trgm")
   @@map("tasks")
+}
+
+/// Backs next_task_key(), which produces TSK-2026-00001 style keys.
+/// Written only by that SQL function — never by Prisma Client. Declared here
+/// purely so migrations don't see an unknown table and offer to drop it.
+model TaskKeyCounter {
+  year  Int    @id
+  value BigInt @default(0)
+
+  @@map("task_key_counters")
 }
 
 /// One accountable owner + contributors (Build Spec §3). Contributors may log
@@ -382,7 +417,7 @@ model TaskContributor {
 
   addedById BigInt   @map("added_by_id")
   addedBy   User     @relation("ContributorAddedBy", fields: [addedById], references: [id])
-  addedAt   DateTime @default(now()) @map("added_at")
+  addedAt   DateTime @default(now()) @map("added_at") @db.Timestamptz(3)
 
   @@unique([taskId, userId])
   @@index([userId])
@@ -418,13 +453,14 @@ model TimeEntry {
   userId BigInt @map("user_id")
   user   User   @relation("TimeEntryOwner", fields: [userId], references: [id])
 
-  /// The day the work happened — a calendar date, not a timestamp. Friday's
-  /// work logged on Monday is dated Friday, and no report shifts on UTC.
+  /// The DAY the work happened — a calendar date, not an instant.
   workDate DateTime @map("work_date") @db.Date
 
-  /// Null for manual entries. A running timer is startedAt set + endedAt null.
-  startedAt DateTime? @map("started_at")
-  endedAt   DateTime? @map("ended_at")
+  /// Null for manual entries. A running timer is startedAt set, endedAt null.
+  /// Timestamptz because the exclusion constraint builds a tstzrange from
+  /// these, and because a timer start is an instant, not a wall-clock reading.
+  startedAt DateTime? @map("started_at") @db.Timestamptz(3)
+  endedAt   DateTime? @map("ended_at") @db.Timestamptz(3)
 
   /// Always populated and authoritative, including for timer entries.
   durationMinutes Int             @default(0) @map("duration_minutes")
@@ -434,22 +470,22 @@ model TimeEntry {
   /// Set only when someone other than the owner edits. Always audited.
   editedById BigInt?   @map("edited_by_id")
   editedBy   User?     @relation("TimeEntryEditor", fields: [editedById], references: [id])
-  editedAt   DateTime? @map("edited_at")
+  editedAt   DateTime? @map("edited_at") @db.Timestamptz(3)
   editReason String?   @map("edit_reason")
 
   /// Timer exceeded the watchdog ceiling and was suspended pending the user
   /// confirming actual hours. Suspended entries do not count toward totals.
   isSuspended Boolean @default(false) @map("is_suspended")
 
-  createdAt    DateTime  @default(now()) @map("created_at")
-  deletedAt    DateTime? @map("deleted_at")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(3)
   deleteReason String?   @map("delete_reason")
 
   @@index([userId, workDate])
   @@index([taskId, deletedAt])
-  // The single-running-timer rule is a partial unique index, added in
-  // prisma/sql/02_constraints.sql — Prisma cannot express it. Application
-  // checks race; the index cannot.
+  // The single-running-timer rule is a partial unique index added in the
+  // migration — Prisma cannot express it. Application checks race; an index
+  // cannot.
   @@map("time_entries")
 }
 
@@ -463,15 +499,15 @@ model Comment {
   authorId BigInt @map("author_id")
   author   User   @relation(fields: [authorId], references: [id])
 
-  bodyMd   String   @map("body_md")
+  bodyMd String @map("body_md")
   /// User ids parsed from @mentions at write time.
   mentions BigInt[] @default([])
 
-  createdAt DateTime  @default(now()) @map("created_at")
-  editedAt  DateTime? @map("edited_at") // editable for 15 minutes, then frozen
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  editedAt  DateTime? @map("edited_at") @db.Timestamptz(3) // editable 15 min, then frozen
   /// Soft delete leaves a tombstone. Comments are part of the work record;
   /// silent disappearance is not acceptable in a professional services firm.
-  deletedAt   DateTime? @map("deleted_at")
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedById BigInt?   @map("deleted_by_id")
 
   attachments Attachment[]
@@ -481,25 +517,25 @@ model Comment {
 }
 
 model Attachment {
-  id        BigInt  @id @default(autoincrement())
-  taskId    BigInt? @map("task_id")
-  task      Task?   @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  commentId BigInt? @map("comment_id")
+  id        BigInt   @id @default(autoincrement())
+  taskId    BigInt?  @map("task_id")
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  commentId BigInt?  @map("comment_id")
   comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   /// Key in the private Azure Blob container. Never a public URL — downloads
-  /// issue a 5-minute user-bound SAS after the same read check as the task.
-  blobKey      String  @unique @map("blob_key")
-  filename     String
-  mimeType     String  @map("mime_type")
-  sizeBytes    Int     @map("size_bytes")
+  /// issue a short-lived user-bound SAS after the same read check as the task.
+  blobKey   String @unique @map("blob_key")
+  filename  String
+  mimeType  String @map("mime_type")
+  sizeBytes Int    @map("size_bytes")
   /// PENDING | CLEAN | INFECTED. Not downloadable until CLEAN.
-  scanStatus   String  @default("PENDING") @map("scan_status")
+  scanStatus String @default("PENDING") @map("scan_status")
 
-  uploadedById BigInt   @map("uploaded_by_id")
-  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
-  createdAt    DateTime @default(now()) @map("created_at")
-  deletedAt    DateTime? @map("deleted_at")
+  uploadedById BigInt    @map("uploaded_by_id")
+  uploadedBy   User      @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(3)
 
   @@index([taskId])
   @@index([commentId])
@@ -508,8 +544,8 @@ model Attachment {
 
 // ───────────────────────────────────────────────── activity & notifications
 
-/// Append-only. The application DB role is granted INSERT/SELECT only.
-/// One table covers task events plus attachment downloads and exports.
+/// Append-only. The app DB role is granted INSERT/SELECT only. One table
+/// covers task events plus attachment downloads and report exports.
 model ActivityLog {
   id      BigInt @id @default(autoincrement())
   taskId  BigInt? @map("task_id")
@@ -522,13 +558,13 @@ model ActivityLog {
   /// JSON so any field type round-trips without a per-type column.
   oldValue Json? @map("old_value")
   newValue Json? @map("new_value")
-  /// Mandatory for: deadline change, reopen, cancel, review rejection,
-  /// editing someone else's time. Enforced in the service layer.
+  /// Mandatory for: deadline change, reopen, cancel, review rejection, and
+  /// editing someone else's time.
   reason String?
 
   requestId String?  @map("request_id")
   ip        String?
-  actedAt   DateTime @default(now()) @map("acted_at")
+  actedAt   DateTime @default(now()) @map("acted_at") @db.Timestamptz(3)
 
   @@index([taskId, actedAt])
   @@index([actorId, actedAt])
@@ -547,9 +583,9 @@ model Notification {
 
   /// Events on one task within 15 minutes collapse onto the same key.
   coalesceKey String?   @map("coalesce_key")
-  readAt      DateTime? @map("read_at")
-  emailSentAt DateTime? @map("email_sent_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
+  readAt      DateTime? @map("read_at") @db.Timestamptz(3)
+  emailSentAt DateTime? @map("email_sent_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([userId, readAt, createdAt])
   @@index([coalesceKey])
@@ -558,14 +594,13 @@ model Notification {
 
 // ───────────────────────────────────────────────────────── recurrence
 
-/// Kept deliberately narrow: a rule generates tasks. It is not a workflow
+/// Deliberately narrow: a rule generates tasks. It is not a workflow
 /// automation engine (scope lock).
 model RecurrenceRule {
   id           BigInt     @id @default(autoincrement())
   engagementId BigInt     @map("engagement_id")
   engagement   Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
 
-  // Task template
   titlePattern      String  @map("title_pattern") // "GSTR-3B — {period}"
   description       String?
   defaultAssigneeId BigInt? @map("default_assignee_id")
@@ -580,15 +615,15 @@ model RecurrenceRule {
   monthsOfYear Int[] @default([]) @map("months_of_year")
   /// Statutory dates are defined by law, not by an offset: GSTR-3B is due the
   /// 20th of the month FOLLOWING the period. So the rule is period → due date.
-  dueDayOfMonth   Int @map("due_day_of_month")
-  dueMonthOffset  Int @default(1) @map("due_month_offset")
+  dueDayOfMonth  Int @map("due_day_of_month")
+  dueMonthOffset Int @default(1) @map("due_month_offset")
   /// Create the task this many days before it is due, so it can be worked on.
   generateLeadDays Int @default(10) @map("generate_lead_days")
 
   isActive  Boolean   @default(true) @map("is_active")
   endsOn    DateTime? @map("ends_on") @db.Date
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   instances RecurrenceInstance[]
   tasks     Task[]
@@ -603,8 +638,8 @@ model RecurrenceInstance {
   id     BigInt         @id @default(autoincrement())
   ruleId BigInt         @map("rule_id")
   rule   RecurrenceRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-  /// "2026-04" for monthly, "2026-Q1" for quarterly, "2025-26" for annual.
-  periodKey String @map("period_key")
+  /// "2026-04" monthly, "2026-Q1" quarterly, "2025-26" annual.
+  periodKey String  @map("period_key")
   taskId    BigInt? @map("task_id")
 
   /// Set when the prior period's task was still open at generation time. One
@@ -613,7 +648,7 @@ model RecurrenceInstance {
   skipped            Boolean @default(false)
   skipReason         String? @map("skip_reason")
 
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@unique([ruleId, periodKey])
   @@map("recurrence_instances")
@@ -622,17 +657,17 @@ model RecurrenceInstance {
 // ───────────────────────────────────────────────────────── misc
 
 model SavedView {
-  id      BigInt  @id @default(autoincrement())
+  id BigInt @id @default(autoincrement())
   /// Null owner = firm-shared preset.
   ownerId BigInt? @map("owner_id")
   owner   User?   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   name    String
   filters Json
   /// Preloaded views cannot be deleted by users.
-  isSystem Boolean @default(false) @map("is_system")
-  sortOrder Int    @default(0) @map("sort_order")
+  isSystem  Boolean @default(false) @map("is_system")
+  sortOrder Int     @default(0) @map("sort_order")
 
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([ownerId])
   @@map("saved_views")
@@ -641,7 +676,7 @@ model SavedView {
 model Setting {
   key       String   @id
   value     Json
-  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("settings")
 }
