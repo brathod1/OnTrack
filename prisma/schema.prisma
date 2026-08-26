@@ -36,13 +36,6 @@ datasource db {
 
 // ───────────────────────────────────────────────────────────── enums
 
-enum Role {
-  ADMIN
-  PARTNER
-  MANAGER
-  MEMBER
-}
-
 /// Drives default capacity expectations and whether review defaults on.
 enum Grade {
   PARTNER
@@ -201,12 +194,59 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  // Roles (step G3) and configurable statuses (step G4) attach here next.
+  // Configurable statuses (step G4) attach here next.
   users   User[]
   teams   Team[]
   clients Client[]
+  roles   Role[]
 
   @@map("organizations")
+}
+
+/// A named set of capabilities.
+///
+/// ─────────────────────────────────────────────────────────────────────────
+/// Replaces the hardcoded Role enum. "Senior" is now a row whose label an
+/// administrator can change to "Project Manager", and whose capabilities they
+/// can re-scope — neither being a deployment.
+///
+/// Nothing in the engine ever looks a role up by name. Every permission check
+/// asks whether the acting user HAS A CAPABILITY, never what they are called.
+/// If you find code comparing a role key, that is the regression this model
+/// exists to prevent.
+///
+/// Capabilities are a string array rather than a join table. The set is small,
+/// fixed by the code that checks it, and stored this way it arrives with the
+/// user in one query instead of two.
+/// ─────────────────────────────────────────────────────────────────────────
+model Role {
+  id             BigInt       @id @default(autoincrement())
+  organizationId BigInt       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  /// Stable identifier for seeds and migrations. Never shown to a user.
+  key         String
+  /// What people see. Freely editable.
+  label       String
+  description String?
+
+  /// Capability keys from src/lib/auth/capabilities.ts.
+  capabilities String[] @default([])
+
+  /// Cannot be deleted, and cannot be stripped of the capabilities needed to
+  /// administer the system — otherwise an administrator can lock every human
+  /// out of the installation, recoverable only with database access.
+  isSystem  Boolean @default(false) @map("is_system")
+  sortOrder Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  users User[]
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+  @@map("roles")
 }
 
 // ───────────────────────────────────────────────────────────── people
@@ -216,12 +256,15 @@ model User {
   entraObjectId String?    @unique @map("entra_object_id")
   email         String     @unique
   name          String
-  role          Role       @default(MEMBER)
   grade         Grade      @default(EXECUTIVE)
   status        UserStatus @default(PENDING)
 
   organizationId BigInt       @map("organization_id")
   organization   Organization @relation(fields: [organizationId], references: [id])
+
+  /// What this person may do. A row, not an enum value.
+  roleId BigInt @map("role_id")
+  role   Role   @relation(fields: [roleId], references: [id])
 
   teamId BigInt? @map("team_id")
   team   Team?   @relation(fields: [teamId], references: [id])
@@ -263,6 +306,7 @@ model User {
   // PostgreSQL does not index foreign keys automatically, and an undeclared
   // index is treated as drift to be dropped.
   @@index([organizationId])
+  @@index([roleId])
   @@map("users")
 }
 

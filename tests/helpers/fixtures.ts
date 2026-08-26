@@ -30,8 +30,9 @@
  * ─────────────────────────────────────────────────────────────────────────
  */
 
-import { EngagementCapacity, Grade, Role, TaskStatus, UserStatus } from "@prisma/client";
+import { EngagementCapacity, Grade, TaskStatus, UserStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { DEFAULT_ROLES } from "@/lib/auth/capabilities";
 
 export interface Firm {
   organizationId: bigint;
@@ -75,6 +76,31 @@ export async function buildFirm(): Promise<Firm> {
     data: { name: "Fixture Organisation", shortName: "FIX" },
   });
 
+  // Roles come from the same DEFAULT_ROLES the seed and the migration use, so
+  // a capability moved between roles is exercised by the tests rather than
+  // diverging from what a real installation has.
+  await prisma.role.createMany({
+    data: DEFAULT_ROLES.map((r) => ({
+      organizationId: org.id,
+      key: r.key,
+      label: r.label,
+      description: r.description,
+      capabilities: [...r.capabilities],
+      isSystem: r.isSystem,
+      sortOrder: r.sortOrder,
+    })),
+  });
+
+  const roles = await prisma.role.findMany({
+    where: { organizationId: org.id },
+    select: { id: true, key: true },
+  });
+  const roleId = (key: string): bigint => {
+    const found = roles.find((r) => r.key === key);
+    if (!found) throw new Error(`Fixture role "${key}" not found`);
+    return found.id;
+  };
+
   const tax = await prisma.team.create({
     data: { name: "Direct Tax", organizationId: org.id },
   });
@@ -85,7 +111,7 @@ export async function buildFirm(): Promise<Firm> {
   const mk = (
     email: string,
     name: string,
-    role: Role,
+    roleKey: string,
     grade: Grade,
     teamId?: bigint,
     reportsToId?: bigint
@@ -94,7 +120,7 @@ export async function buildFirm(): Promise<Firm> {
       data: {
         email,
         name,
-        role,
+        roleId: roleId(roleKey),
         grade,
         status: UserStatus.ACTIVE,
         organizationId: org.id,
@@ -105,16 +131,16 @@ export async function buildFirm(): Promise<Firm> {
 
   // .invalid is reserved by RFC 2606 and can never be a real domain, so these
   // addresses cannot collide with a real person if fixtures ever leak.
-  const admin = await mk("admin@example.invalid", "Ada Admin", Role.ADMIN, Grade.DIRECTOR);
-  const priya = await mk("priya@example.invalid", "Priya Partner", Role.PARTNER, Grade.PARTNER);
-  const quentin = await mk("quentin@example.invalid", "Quentin Partner", Role.PARTNER, Grade.PARTNER);
-  const meera = await mk("meera@example.invalid", "Meera Manager", Role.MANAGER, Grade.MANAGER, tax.id);
-  const nikhil = await mk("nikhil@example.invalid", "Nikhil Manager", Role.MANAGER, Grade.MANAGER, audit.id);
+  const admin = await mk("admin@example.invalid", "Ada Admin", "admin", Grade.DIRECTOR);
+  const priya = await mk("priya@example.invalid", "Priya Partner", "partner", Grade.PARTNER);
+  const quentin = await mk("quentin@example.invalid", "Quentin Partner", "partner", Grade.PARTNER);
+  const meera = await mk("meera@example.invalid", "Meera Manager", "senior", Grade.MANAGER, tax.id);
+  const nikhil = await mk("nikhil@example.invalid", "Nikhil Manager", "senior", Grade.MANAGER, audit.id);
 
-  const eshan = await mk("eshan@example.invalid", "Eshan Exec", Role.MEMBER, Grade.SENIOR, tax.id, meera.id);
-  const esha = await mk("esha@example.invalid", "Esha Exec", Role.MEMBER, Grade.EXECUTIVE, tax.id, meera.id);
-  const ellie = await mk("ellie@example.invalid", "Ellie Exec", Role.MEMBER, Grade.EXECUTIVE, audit.id, nikhil.id);
-  const chandra = await mk("chandra@example.invalid", "Chandra Contractor", Role.MEMBER, Grade.EXECUTIVE);
+  const eshan = await mk("eshan@example.invalid", "Eshan Exec", "staff", Grade.SENIOR, tax.id, meera.id);
+  const esha = await mk("esha@example.invalid", "Esha Exec", "staff", Grade.EXECUTIVE, tax.id, meera.id);
+  const ellie = await mk("ellie@example.invalid", "Ellie Exec", "staff", Grade.EXECUTIVE, audit.id, nikhil.id);
+  const chandra = await mk("chandra@example.invalid", "Chandra Contractor", "staff", Grade.EXECUTIVE);
 
   const clientA = await prisma.client.create({
     data: {

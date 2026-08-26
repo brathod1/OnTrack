@@ -31,12 +31,12 @@ import {
   NotificationType,
   PrismaClient,
   Priority,
-  Role,
   TaskStatus,
   TimeEntrySource,
   UserStatus,
   DueDateType,
 } from "@prisma/client";
+import { DEFAULT_ROLES } from "../src/lib/auth/capabilities";
 
 const db = new PrismaClient({
   datasourceUrl: process.env.DIRECT_DATABASE_URL,
@@ -153,6 +153,35 @@ async function main() {
 
   console.log(`  Organisation: ${org.name}`);
 
+  // ── Roles ────────────────────────────────────────────────────────────────
+  // Also configuration. This firm gets Administrator / Partner / Senior /
+  // Staff because that is what a CA firm calls these people. An administrator
+  // can rename any of them, or move a capability between them, without a
+  // deployment — nothing in the engine looks a role up by name.
+  await db.role.createMany({
+    data: DEFAULT_ROLES.map((r) => ({
+      organizationId: org.id,
+      key: r.key,
+      label: r.label,
+      description: r.description,
+      capabilities: [...r.capabilities],
+      isSystem: r.isSystem,
+      sortOrder: r.sortOrder,
+    })),
+  });
+
+  const roleRows = await db.role.findMany({
+    where: { organizationId: org.id },
+    select: { id: true, key: true, label: true },
+  });
+  const roleId = (key: string): bigint => {
+    const found = roleRows.find((r) => r.key === key);
+    if (!found) throw new Error(`Seed role "${key}" not found`);
+    return found.id;
+  };
+
+  console.log(`  Roles: ${roleRows.map((r) => r.label).join(", ")}`);
+
   // ── Teams (service lines) ────────────────────────────────────────────────
   // Configuration too. These are this firm's service lines, not categories the
   // engine knows about.
@@ -173,12 +202,13 @@ async function main() {
   // ── People ───────────────────────────────────────────────────────────────
   // Deliberately named so their role is obvious at a glance in the UI.
   const mk = (
-    email: string, name: string, role: Role, grade: Grade,
+    email: string, name: string, roleKey: string, grade: Grade,
     teamId?: bigint, reportsToId?: bigint
   ) =>
     db.user.create({
       data: {
-        email, name, role, grade,
+        email, name, grade,
+        roleId: roleId(roleKey),
         status: UserStatus.ACTIVE,
         organizationId: org.id,
         teamId: teamId ?? null,
@@ -186,24 +216,24 @@ async function main() {
       },
     });
 
-  const aarti = await mk("admin@demo.invalid", "Aarti Admin", Role.ADMIN, Grade.DIRECTOR, admin_.id);
-  const raghav = await mk("partner.rao@demo.invalid", "Raghav Rao", Role.PARTNER, Grade.PARTNER);
-  const sneha = await mk("partner.shah@demo.invalid", "Sneha Shah", Role.PARTNER, Grade.PARTNER);
+  const aarti = await mk("admin@demo.invalid", "Aarti Admin", "admin", Grade.DIRECTOR, admin_.id);
+  const raghav = await mk("partner.rao@demo.invalid", "Raghav Rao", "partner", Grade.PARTNER);
+  const sneha = await mk("partner.shah@demo.invalid", "Sneha Shah", "partner", Grade.PARTNER);
 
-  const kavya = await mk("manager.iyer@demo.invalid", "Kavya Iyer", Role.MANAGER, Grade.MANAGER, directTax.id);
-  const rohit = await mk("manager.desai@demo.invalid", "Rohit Desai", Role.MANAGER, Grade.MANAGER, audit.id);
+  const kavya = await mk("manager.iyer@demo.invalid", "Kavya Iyer", "senior", Grade.MANAGER, directTax.id);
+  const rohit = await mk("manager.desai@demo.invalid", "Rohit Desai", "senior", Grade.MANAGER, audit.id);
 
-  const anjali = await mk("exec.nair@demo.invalid", "Anjali Nair", Role.MEMBER, Grade.SENIOR, directTax.id, kavya.id);
-  const vikram = await mk("exec.gupta@demo.invalid", "Vikram Gupta", Role.MEMBER, Grade.EXECUTIVE, gst.id, kavya.id);
-  const divya = await mk("exec.menon@demo.invalid", "Divya Menon", Role.MEMBER, Grade.EXECUTIVE, audit.id, rohit.id);
-  const karan = await mk("article.jain@demo.invalid", "Karan Jain", Role.MEMBER, Grade.ARTICLE, audit.id, rohit.id);
+  const anjali = await mk("exec.nair@demo.invalid", "Anjali Nair", "staff", Grade.SENIOR, directTax.id, kavya.id);
+  const vikram = await mk("exec.gupta@demo.invalid", "Vikram Gupta", "staff", Grade.EXECUTIVE, gst.id, kavya.id);
+  const divya = await mk("exec.menon@demo.invalid", "Divya Menon", "staff", Grade.EXECUTIVE, audit.id, rohit.id);
+  const karan = await mk("article.jain@demo.invalid", "Karan Jain", "staff", Grade.ARTICLE, audit.id, rohit.id);
 
   // Someone who has signed in via Entra but not yet been approved. Exists so
   // the admin approval queue has something in it from day one.
   await db.user.create({
     data: {
       email: "newjoiner@demo.invalid", name: "Pending Newjoiner",
-      role: Role.MEMBER, grade: Grade.EXECUTIVE, status: UserStatus.PENDING,
+      roleId: roleId("staff"), grade: Grade.EXECUTIVE, status: UserStatus.PENDING,
       organizationId: org.id,
     },
   });
@@ -212,7 +242,7 @@ async function main() {
   await db.user.create({
     data: {
       email: "former.staff@demo.invalid", name: "Former Staff",
-      role: Role.MEMBER, grade: Grade.EXECUTIVE, status: UserStatus.INACTIVE,
+      roleId: roleId("staff"), grade: Grade.EXECUTIVE, status: UserStatus.INACTIVE,
       organizationId: org.id,
       teamId: audit.id, reportsToId: rohit.id, deactivatedAt: hoursAgo(24 * 40),
     },

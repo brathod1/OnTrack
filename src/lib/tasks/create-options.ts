@@ -1,6 +1,7 @@
 import { TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { canCreateTask, type ActingUser } from "@/lib/auth/permissions";
+import { can, canCreateTask, type ActingUser } from "@/lib/auth/permissions";
+import { CAP } from "@/lib/auth/capabilities";
 
 /**
  * The data behind the quick-create form.
@@ -51,7 +52,10 @@ export async function getCreateOptions(user: ActingUser): Promise<CreateOptions>
         { id: { in: user.engagementIds } },
         { partnerId: user.id },
         { managerId: user.id },
-        ...(user.role === "ADMIN" ? [{}] : []),
+        // Someone who administers the organisation may create work anywhere.
+        // This widens the candidate set only — canCreateTask below is still
+        // the actual decision.
+        ...(can(user, CAP.MANAGE_ORGANIZATION) ? [{}] : []),
       ],
     },
     select: {

@@ -39,8 +39,14 @@ export default async function SignInPage({
   const devUsers = isDev
     ? await prisma.user.findMany({
         where: { status: "ACTIVE" },
-        select: { email: true, name: true, role: true, grade: true, team: { select: { name: true } } },
-        orderBy: [{ role: "asc" }, { name: "asc" }],
+        select: {
+          email: true,
+          name: true,
+          grade: true,
+          team: { select: { name: true } },
+          role: { select: { label: true, sortOrder: true } },
+        },
+        orderBy: [{ role: { sortOrder: "asc" } }, { name: "asc" }],
       })
     : [];
 
@@ -123,7 +129,7 @@ export default async function SignInPage({
                           </span>
                         </span>
                         <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-slate-600">
-                          {u.role}
+                          {u.role.label}
                         </span>
                       </button>
                     </form>

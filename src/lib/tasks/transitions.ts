@@ -11,7 +11,7 @@
  * There is no code path that writes `task.status` directly.
  */
 
-import { Role, TaskStatus } from "@prisma/client";
+import { TaskStatus } from "@prisma/client";
 import type { ActingUser, TaskWriteContext } from "@/lib/auth/permissions";
 import { canManageTask } from "@/lib/auth/permissions";
 
@@ -288,5 +288,7 @@ export const OPEN_STATUSES: TaskStatus[] = [
   TaskStatus.REVIEW,
 ];
 
-/** Roles that can hold the MANAGER actor position. Convenience for the UI. */
-export const MANAGING_ROLES: Role[] = [Role.ADMIN, Role.PARTNER, Role.MANAGER];
+// MANAGING_ROLES was removed with the Role enum. Nothing consumed it, and a
+// list of role names is exactly the wrong shape now: whether someone holds the
+// MANAGER actor position is decided by canManageTask(), which asks for a
+// capability plus a relationship rather than a name.

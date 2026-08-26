@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireActingUser, getSessionUser } from "@/lib/auth/session";
-import { canViewAllTasks } from "@/lib/auth/permissions";
+import { canOverseeOthers, canViewAllTasks } from "@/lib/auth/permissions";
 import { signOut } from "@/lib/auth/auth";
 
 export const runtime = "nodejs";
@@ -24,7 +24,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const session = await getSessionUser();
 
   const canSeeAll = canViewAllTasks(actor);
-  const isManagerOrAbove = actor.role !== "MEMBER";
+  // A capability question, not "is this person senior enough". An organisation
+  // that gives its team leads task.assign gets the Team view for them without
+  // anyone editing this file.
+  const showTeamView = canOverseeOthers(actor);
 
   async function doSignOut() {
     "use server";
@@ -41,7 +44,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
           <nav className="flex flex-1 items-center gap-1 overflow-x-auto" aria-label="Main">
             <NavLink href="/tasks">My work</NavLink>
-            {isManagerOrAbove && <NavLink href="/team">Team</NavLink>}
+            {showTeamView && <NavLink href="/team">Team</NavLink>}
             <NavLink href="/clients">Clients</NavLink>
             {canSeeAll && <NavLink href="/tasks/all">All tasks</NavLink>}
           </nav>

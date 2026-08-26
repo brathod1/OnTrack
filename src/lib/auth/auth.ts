@@ -3,7 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import { UserStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { getCurrentOrganizationId } from "@/lib/org/current";
+import { getCurrentOrganizationId, getDefaultRoleIdForNewUser } from "@/lib/org/current";
 import { authConfig } from "./auth.config";
 
 /**
@@ -117,6 +117,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // this becomes a lookup by domain or invitation and nothing else
           // in this callback changes.
           const organizationId = await getCurrentOrganizationId();
+          // Least-privileged role available. They are PENDING and cannot sign
+          // in until approved, but if that gate were ever weakened the failure
+          // should be "can do nothing", not "can do everything".
+          const roleId = await getDefaultRoleIdForNewUser(organizationId);
 
           await prisma.user.create({
             data: {
@@ -125,6 +129,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               name: user.name ?? email,
               status: UserStatus.PENDING,
               organizationId,
+              roleId,
             },
           });
           return "/signin?error=pending_approval";

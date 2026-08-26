@@ -12,19 +12,62 @@
  * ─────────────────────────────────────────────────────────────────────────
  */
 
-import { Prisma, Role, TaskStatus } from "@prisma/client";
+import { Prisma, TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { CAP, isCapability, type Capability } from "./capabilities";
 
 // ── The session shape the whole app works with ──────────────────────────────
 
 export interface ActingUser {
   id: bigint;
-  role: Role;
+
+  /**
+   * What this user may do. THE basis of every permission decision.
+   *
+   * Note there is no `role` field used for decisions. `roleLabel` below is for
+   * display only — if you ever find yourself comparing it, the answer you want
+   * is a capability. That is the whole point of this model: another
+   * organisation renames "Senior" to "Project Manager" and nothing breaks.
+   */
+  capabilities: ReadonlySet<Capability>;
+
+  /** Display only. Never branch on these. */
+  roleId: bigint;
+  roleKey: string;
+  roleLabel: string;
+
   teamId: bigint | null;
   /** Transitive closure of everyone below this user in the reporting line. */
   reportChainIds: bigint[];
   /** Engagements where this user has an active membership. */
   engagementIds: bigint[];
+}
+
+/**
+ * Does this user hold a capability?
+ *
+ * ⚠ ON ITS OWN THIS IS NOT A PERMISSION CHECK.
+ *
+ *     CAPABILITY grants the ABILITY.  RELATIONSHIP grants the SCOPE.
+ *
+ * "May reassign tasks" is a capability; "…but only on engagements she manages,
+ * or for her reports" is a relationship. Every function below checks both. A
+ * check that consults only `can()` would let any manager reassign anyone's
+ * work anywhere in the firm.
+ */
+export function can(user: ActingUser, capability: Capability): boolean {
+  return user.capabilities.has(capability);
+}
+
+/**
+ * Whether this user administers the organisation.
+ *
+ * Expressed as a capability rather than a role comparison, so an organisation
+ * that splits administration across two roles gets the behaviour it configured
+ * rather than the behaviour we assumed.
+ */
+function isOrgAdmin(user: ActingUser): boolean {
+  return user.capabilities.has(CAP.MANAGE_ORGANIZATION);
 }
 
 // Defined in @/lib/errors, which imports nothing — so the HTTP layer can map
@@ -68,7 +111,12 @@ export async function loadActingUser(userId: bigint): Promise<ActingUser> {
   const [user, memberships, reportChainIds] = await Promise.all([
     prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { id: true, role: true, teamId: true, status: true },
+      select: {
+        id: true,
+        teamId: true,
+        status: true,
+        role: { select: { id: true, key: true, label: true, capabilities: true } },
+      },
     }),
     prisma.engagementMember.findMany({
       where: { userId, OR: [{ validTo: null }, { validTo: { gt: new Date() } }] },
@@ -80,9 +128,19 @@ export async function loadActingUser(userId: bigint): Promise<ActingUser> {
   // A deactivated user has no reach at all, even with a live session cookie.
   if (user.status !== "ACTIVE") throw new ForbiddenError("account is not active");
 
+  // Unknown strings are dropped rather than trusted. A capability removed from
+  // the code but still stored on a role would otherwise sit in the set forever,
+  // silently granting something no check understands.
+  const capabilities = new Set<Capability>(
+    user.role.capabilities.filter(isCapability)
+  );
+
   return {
     id: user.id,
-    role: user.role,
+    capabilities,
+    roleId: user.role.id,
+    roleKey: user.role.key,
+    roleLabel: user.role.label,
     teamId: user.teamId,
     reportChainIds,
     engagementIds: memberships.map((m) => m.engagementId),
@@ -104,9 +162,9 @@ export async function loadActingUser(userId: bigint): Promise<ActingUser> {
 export function visibleTaskFilter(user: ActingUser): Prisma.TaskWhereInput {
   const notDeleted: Prisma.TaskWhereInput = { deletedAt: null };
 
-  // Admin sees everything. This is the only unconditional grant in the system,
-  // and it is audited like every other read of an attachment or export.
-  if (user.role === Role.ADMIN) return notDeleted;
+  // The one capability that bypasses the relationship model entirely, which is
+  // why it is granted sparingly and its use is auditable.
+  if (can(user, CAP.VIEW_ALL_TASKS)) return notDeleted;
 
   const relationships: Prisma.TaskWhereInput[] = [
     { assigneeId: user.id }, // 1. assignee
@@ -127,15 +185,23 @@ export function visibleTaskFilter(user: ActingUser): Prisma.TaskWhereInput {
     relationships.push({ contributors: { some: { userId: { in: user.reportChainIds } } } });
   }
 
-  // 7. Partner or manager named on the engagement — covers engagements where
-  //    they hold responsibility without being listed as a working member.
-  if (user.role === Role.PARTNER || user.role === Role.MANAGER) {
-    relationships.push({
-      engagement: {
-        OR: [{ partnerId: user.id }, { managerId: user.id }, { client: { relationshipPartnerId: user.id } }],
-      },
-    });
-  }
+  // 7. Named as the partner or manager ON the engagement, or as the client's
+  //    relationship partner — responsibility held without being listed as a
+  //    working member.
+  //
+  //    NO CAPABILITY GATE HERE, deliberately. This branch previously required
+  //    role PARTNER or MANAGER, which was wrong: being named on an engagement
+  //    IS the relationship. Whoever the organisation put in that column can
+  //    see the work, whatever their role is called.
+  relationships.push({
+    engagement: {
+      OR: [
+        { partnerId: user.id },
+        { managerId: user.id },
+        { client: { relationshipPartnerId: user.id } },
+      ],
+    },
+  });
 
   return { AND: [notDeleted, { OR: relationships }] };
 }
@@ -174,15 +240,18 @@ export interface TaskWriteContext {
  * an engagement lets you see the work, not re-plan someone else's.
  */
 export function canManageTask(user: ActingUser, task: TaskWriteContext): boolean {
-  if (user.role === Role.ADMIN) return true;
-  if (user.role === Role.MEMBER) return false;
+  // ABILITY: without this, nothing else matters — a Staff role holds no
+  // task.assign, so the relationship checks below never run for them.
+  if (!can(user, CAP.TASK_ASSIGN)) return false;
 
+  if (isOrgAdmin(user)) return true;
+
+  // SCOPE: one of these relationships must also hold.
   return (
     task.engagementPartnerId === user.id ||
     task.engagementManagerId === user.id ||
     user.reportChainIds.includes(task.assigneeId) ||
-    // A manager who is an active member of the engagement can direct its work.
-    (user.role === Role.MANAGER && user.engagementIds.includes(task.engagementId))
+    user.engagementIds.includes(task.engagementId)
   );
 }
 
@@ -218,23 +287,34 @@ export function canWriteField(
   const isAssignee = task.assigneeId === user.id;
 
   switch (field) {
-    // Manager-only: these define the commitment.
-    case "priority":
-    case "dueDate":
+    // Reassigning and naming a reviewer are the essence of directing work,
+    // so `manages` (which already requires task.assign) is the whole test.
     case "assigneeId":
     case "reviewerId":
       return manages;
 
-    // Classifying work as statutory / client-committed / internal drives
-    // escalation and colour, and a manager is the right person to judge it.
-    // Note this cannot be used to escape a deadline: the ceiling is enforced
-    // by the statutoryDueDate CHECK constraint, not by this field.
-    case "dueDateType":
-      return manages;
+    // Separate capabilities, deliberately. An organisation may want a team
+    // lead who distributes work without being able to renegotiate the
+    // commitments attached to it — that is a role with task.assign but not
+    // task.set_deadline, and it is now expressible.
+    case "priority":
+      return manages && can(user, CAP.TASK_SET_PRIORITY);
 
-    // A statutory date is a matter of law, not of management discretion.
+    case "dueDate":
+      return manages && can(user, CAP.TASK_SET_DEADLINE);
+
+    // Classifying work drives escalation and display. Cannot be used to escape
+    // a deadline: the ceiling is enforced by the CHECK constraint on the
+    // external date, not by this field.
+    case "dueDateType":
+      return manages && can(user, CAP.TASK_SET_DEADLINE);
+
+    // A date the organisation does not control — a statutory filing deadline,
+    // a contractual SLA. Getting it wrong has consequences outside this
+    // system, so it carries its own capability rather than riding on
+    // task.set_deadline.
     case "statutoryDueDate":
-      return user.role === Role.ADMIN;
+      return can(user, CAP.TASK_SET_EXTERNAL_DEADLINE);
 
     case "title":
     case "description":
@@ -272,11 +352,13 @@ export function canWriteField(
  */
 export function canLogTime(user: ActingUser, task: TaskWriteContext): boolean {
   if (task.status === TaskStatus.CANCELLED) return false;
+  if (!can(user, CAP.TIME_LOG)) return false;
+
   return (
     task.assigneeId === user.id ||
     task.isContributor ||
     task.reviewerId === user.id ||
-    user.role === Role.ADMIN
+    isOrgAdmin(user)
   );
 }
 
@@ -286,12 +368,14 @@ export function canLogTime(user: ActingUser, task: TaskWriteContext): boolean {
  * activity log with the old and new values.
  */
 export function canEditOthersTime(user: ActingUser, entryOwnerId: bigint): boolean {
+  // Your own entries need no capability — correcting your own timesheet is
+  // not a privilege.
   if (entryOwnerId === user.id) return true;
-  if (user.role === Role.ADMIN) return true;
-  return (
-    (user.role === Role.MANAGER || user.role === Role.PARTNER) &&
-    user.reportChainIds.includes(entryOwnerId)
-  );
+
+  if (!can(user, CAP.TIME_EDIT_OTHERS)) return false;
+  if (isOrgAdmin(user)) return true;
+
+  return user.reportChainIds.includes(entryOwnerId);
 }
 
 /**
@@ -316,14 +400,16 @@ export interface EngagementCreateContext {
 
 export function canCreateTask(user: ActingUser, eng: EngagementCreateContext): boolean {
   if (!eng.isActive) return false;
-  if (user.role === Role.ADMIN) return true;
+  if (!can(user, CAP.TASK_CREATE)) return false;
 
+  if (isOrgAdmin(user)) return true;
   if (eng.partnerId === user.id || eng.managerId === user.id) return true;
 
-  const isMember = user.engagementIds.includes(eng.engagementId);
-  if (!isMember) return false;
+  if (!user.engagementIds.includes(eng.engagementId)) return false;
 
-  if (user.role === Role.PARTNER || user.role === Role.MANAGER) return true;
+  // Someone who can direct work can always record it. The team's
+  // members-can-create switch is about people who only do the work.
+  if (can(user, CAP.TASK_ASSIGN)) return true;
   return eng.membersCanCreateTasks;
 }
 
@@ -331,12 +417,29 @@ export function canCreateTask(user: ActingUser, eng: EngagementCreateContext): b
 
 /** Scope for the "Team Tasks" view: everyone this user is entitled to oversee. */
 export function overseeableUserIds(user: ActingUser): bigint[] | "ALL" {
-  if (user.role === Role.ADMIN) return "ALL";
+  if (can(user, CAP.VIEW_ALL_TASKS)) return "ALL";
   return [user.id, ...user.reportChainIds];
 }
 
-/** Gate for the "All Tasks" view and firm-wide reports. */
+/**
+ * Gate for the "All tasks" screen.
+ *
+ * ⚠ A SCREEN gate, not a scope grant. Whatever this screen renders is still
+ * passed through `visibleTaskFilter` — a partner sees their own clients across
+ * every engagement, an administrator sees everything. The two are different
+ * capabilities precisely because conflating them once already leaked every
+ * partner's portfolio to every other partner.
+ */
 export function canViewAllTasks(user: ActingUser): boolean {
-  return user.role === Role.ADMIN || user.role === Role.PARTNER;
+  return can(user, CAP.VIEW_ALL_TASKS) || can(user, CAP.VIEW_PORTFOLIO);
+}
+
+/** Gate for the Team view in navigation. */
+export function canOverseeOthers(user: ActingUser): boolean {
+  return (
+    can(user, CAP.TASK_ASSIGN) ||
+    can(user, CAP.VIEW_REPORTS) ||
+    can(user, CAP.VIEW_ALL_TASKS)
+  );
 }
 

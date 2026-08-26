@@ -54,6 +54,43 @@ export async function getCurrentOrganization() {
   return org;
 }
 
+/**
+ * The role a brand-new user should receive.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * Chooses the LEAST PRIVILEGED role in the organisation — fewest capabilities,
+ * breaking ties toward the one sorted last.
+ *
+ * Not "staff", because that is this firm's name for it and another
+ * organisation may not have a role by that name at all. Not the first role
+ * either, which in most orderings is the administrator.
+ *
+ * The safety argument matters more than the naming one. This runs when a
+ * stranger signs in through the identity provider for the first time. They
+ * are created PENDING and refused entry until an administrator approves them,
+ * so the role is provisional — but if the approval step were ever weakened,
+ * the failure should be "they can do nothing" rather than "they can do
+ * everything".
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+export async function getDefaultRoleIdForNewUser(organizationId: bigint): Promise<bigint> {
+  const rows = await prisma.$queryRaw<{ id: bigint }[]>`
+    SELECT id
+      FROM roles
+     WHERE organization_id = ${organizationId}
+     ORDER BY coalesce(array_length(capabilities, 1), 0) ASC, sort_order DESC
+     LIMIT 1
+  `;
+
+  const id = rows[0]?.id;
+  if (!id) {
+    throw new Error(
+      `Organisation ${organizationId} has no roles. Run \`npm run db:seed\`, or create at least one role.`
+    );
+  }
+  return id;
+}
+
 /** Just the id, for the common case of stamping it on a new row. */
 export async function getCurrentOrganizationId(): Promise<bigint> {
   const rows = await prisma.$queryRaw<{ id: bigint }[]>`
