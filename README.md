@@ -203,6 +203,12 @@ verifiable. A failure in one is then unambiguous.
 
 ## Known technical debt
 
+- **Test fixtures are slow.** `tests/tasks/service.test.ts` rebuilds the fixture
+  firm in `beforeEach` (necessary — those tests mutate), costing ~900ms per test
+  and ~32s for the suite. `buildFirm` is ~25 sequential awaits; batching the
+  independent inserts into `createMany` calls should cut it by most of that.
+  Worth doing before the suite reaches ~300 tests.
+
 - **`package.json#prisma` is deprecated.** Prisma 6.19 warns that the `prisma.seed`
   key moves to a `prisma.config.ts` file and is removed in Prisma 7. It works on
   6.x. Deliberately not migrated yet — the config file also changes how the

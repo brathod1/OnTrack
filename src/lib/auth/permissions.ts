@@ -27,19 +27,18 @@ export interface ActingUser {
   engagementIds: bigint[];
 }
 
-export class NotFoundError extends Error {
-  constructor(what = "Resource") {
-    super(`${what} not found`);
-    this.name = "NotFoundError";
-  }
-}
+// Defined in @/lib/errors, which imports nothing — so the HTTP layer can map
+// errors to status codes without pulling in Prisma or Auth.js. Imported for
+// use below AND re-exported, so existing callers are unaffected.
+import { ForbiddenError, NotFoundError } from "@/lib/errors";
 
-export class ForbiddenError extends Error {
-  constructor(action: string) {
-    super(`Not permitted: ${action}`);
-    this.name = "ForbiddenError";
-  }
-}
+export {
+  NotFoundError,
+  ForbiddenError,
+  ConflictError,
+  InvalidOperationError,
+  assertPermitted,
+} from "@/lib/errors";
 
 // ── Loading the acting user ─────────────────────────────────────────────────
 
@@ -201,6 +200,7 @@ export type WritableField =
   | "status"
   | "priority"
   | "dueDate"
+  | "dueDateType"
   | "statutoryDueDate"
   | "assigneeId"
   | "reviewerId"
@@ -223,6 +223,13 @@ export function canWriteField(
     case "dueDate":
     case "assigneeId":
     case "reviewerId":
+      return manages;
+
+    // Classifying work as statutory / client-committed / internal drives
+    // escalation and colour, and a manager is the right person to judge it.
+    // Note this cannot be used to escape a deadline: the ceiling is enforced
+    // by the statutoryDueDate CHECK constraint, not by this field.
+    case "dueDateType":
       return manages;
 
     // A statutory date is a matter of law, not of management discretion.
@@ -287,6 +294,39 @@ export function canEditOthersTime(user: ActingUser, entryOwnerId: bigint): boole
   );
 }
 
+/**
+ * Whether a user may create a task on a given engagement.
+ *
+ * Creation has no task to authorise against, so it needs its own rule. It is
+ * deliberately more permissive than `canManageTask`: a member noting down work
+ * they have discovered is normal and useful, whereas re-planning someone
+ * else's deadline is not. Teams that want it locked down set
+ * `membersCanCreateTasks: false` — Practice Administration does, so nobody
+ * invents their own admin tasks.
+ */
+export interface EngagementCreateContext {
+  engagementId: bigint;
+  partnerId: bigint | null;
+  managerId: bigint | null;
+  /** From the engagement's team. Null team = allowed. */
+  membersCanCreateTasks: boolean;
+  /** CLOSED engagements accept no new work. */
+  isActive: boolean;
+}
+
+export function canCreateTask(user: ActingUser, eng: EngagementCreateContext): boolean {
+  if (!eng.isActive) return false;
+  if (user.role === Role.ADMIN) return true;
+
+  if (eng.partnerId === user.id || eng.managerId === user.id) return true;
+
+  const isMember = user.engagementIds.includes(eng.engagementId);
+  if (!isMember) return false;
+
+  if (user.role === Role.PARTNER || user.role === Role.MANAGER) return true;
+  return eng.membersCanCreateTasks;
+}
+
 // ── Cross-cutting helpers ───────────────────────────────────────────────────
 
 /** Scope for the "Team Tasks" view: everyone this user is entitled to oversee. */
@@ -300,6 +340,3 @@ export function canViewAllTasks(user: ActingUser): boolean {
   return user.role === Role.ADMIN || user.role === Role.PARTNER;
 }
 
-export function assertPermitted(condition: boolean, action: string): asserts condition {
-  if (!condition) throw new ForbiddenError(action);
-}
