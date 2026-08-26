@@ -1,0 +1,89 @@
+# ───────────────────────────────────────────────────────────────────────────
+# OnTrack — .gitignore
+#
+# Written BEFORE `git init` deliberately: once a secret has been committed it
+# lives in the repository history forever, and removing it means rewriting
+# history. Preventing the first commit is the only cheap fix.
+# ───────────────────────────────────────────────────────────────────────────
+
+# ── Secrets ────────────────────────────────────────────────────────────────
+# .env.example IS committed (it documents the required variables with dummy
+# values). Everything else in this family holds real credentials.
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.staging
+!.env.example
+
+# Azure / auth artefacts that occasionally get written into the project folder
+*.pem
+*.pfx
+*.p12
+*.key
+azure.json
+local.settings.json
+
+# ── Dependencies ───────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# ── Next.js build output ───────────────────────────────────────────────────
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# ── Prisma ─────────────────────────────────────────────────────────────────
+# The generated client is a build artefact — it is regenerated from
+# schema.prisma by `prisma generate` on every install and build.
+# NOTE: prisma/migrations/ is NOT ignored. Migrations are source code; a fresh
+# environment must be reproducible from them.
+/generated/
+node_modules/.prisma/
+
+# Local database dumps. prisma/sql/*.sql is deliberately NOT matched here —
+# those are hand-written migration constraints and must be committed.
+*.dump
+*.backup
+pgdata/
+
+# ── Test & coverage ────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+
+# ── Logs ───────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Editors ────────────────────────────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+# VS Code: share the useful bits, ignore personal settings
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+
+# ── OS ─────────────────────────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# ── Misc ───────────────────────────────────────────────────────────────────
+*.local
+.cache/
+tmp/
+temp/
