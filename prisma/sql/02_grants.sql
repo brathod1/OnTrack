@@ -31,9 +31,19 @@
 -- PostgreSQL grants CONNECT to PUBLIC on every new database, which means any
 -- role that can log in to the server can reach this one. Revoke that first, so
 -- connection is by explicit grant only.
-REVOKE CONNECT ON DATABASE ontrack FROM PUBLIC;
-
-GRANT CONNECT ON DATABASE ontrack TO ontrack_owner, ontrack_app, ontrack_readonly;
+--
+-- Uses current_database() rather than a literal name so the same file works
+-- unchanged against ontrack, ontrack_test, staging and production. A hardcoded
+-- name would silently grant on the wrong database when run elsewhere — the
+-- worst kind of bug, because everything appears to succeed.
+DO $$
+BEGIN
+  EXECUTE format('REVOKE CONNECT ON DATABASE %I FROM PUBLIC', current_database());
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO ontrack_owner, ontrack_app, ontrack_readonly',
+                 current_database());
+  RAISE NOTICE 'CONNECT scoped to named roles on database %', current_database();
+END
+$$;
 GRANT USAGE  ON SCHEMA   public   TO ontrack_app, ontrack_readonly;
 
 -- The migration role owns everything in the schema.

@@ -7,14 +7,13 @@
 # ───────────────────────────────────────────────────────────────────────────
 
 # ── Secrets ────────────────────────────────────────────────────────────────
-# .env.example IS committed (it documents the required variables with dummy
-# values). Everything else in this family holds real credentials.
-.env
-.env.local
-.env.*.local
-.env.development
-.env.production
-.env.staging
+# Deny the whole .env family, then re-admit the one safe file.
+#
+# The earlier version listed variants individually (.env, .env.local,
+# .env.development ...) and would NOT have caught .env.test — which holds a
+# real database password. Enumerating known names is the wrong shape for this
+# rule: it fails silently the first time someone invents a new suffix.
+.env*
 !.env.example
 
 # Azure / auth artefacts that occasionally get written into the project folder

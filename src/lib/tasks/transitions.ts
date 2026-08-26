@@ -257,14 +257,28 @@ export function transitionSideEffects(
   return patch;
 }
 
+/**
+ * Declared as an explicit Record rather than an inline object literal.
+ *
+ * An object literal indexed by a variable gives TypeScript an index signature,
+ * which under `noUncheckedIndexedAccess` yields `string | undefined` — so
+ * `label()` could return undefined while claiming to return string, and a
+ * status would silently render as "undefined" in the UI.
+ *
+ * A `Record<TaskStatus, string>` has known keys instead, so indexing it with a
+ * TaskStatus is exhaustive and always yields a string. It also means adding a
+ * status to the enum breaks the build here until a label is supplied.
+ */
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  ASSIGNED: "Assigned",
+  IN_PROGRESS: "In Progress",
+  REVIEW: "In Review",
+  COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
+};
+
 export function label(status: TaskStatus): string {
-  return {
-    [TaskStatus.ASSIGNED]: "Assigned",
-    [TaskStatus.IN_PROGRESS]: "In Progress",
-    [TaskStatus.REVIEW]: "In Review",
-    [TaskStatus.COMPLETED]: "Completed",
-    [TaskStatus.CANCELLED]: "Cancelled",
-  }[status];
+  return STATUS_LABELS[status];
 }
 
 /** Statuses that represent live work — used by every dashboard and workload sum. */
