@@ -36,16 +36,13 @@ datasource db {
 
 // ───────────────────────────────────────────────────────────── enums
 
-/// Drives default capacity expectations and whether review defaults on.
-enum Grade {
-  PARTNER
-  DIRECTOR
-  MANAGER
-  ASSISTANT_MANAGER
-  SENIOR
-  EXECUTIVE
-  ARTICLE
-}
+// The Grade enum was removed here. Its values — PARTNER, ASSISTANT_MANAGER,
+// ARTICLE — were a CA firm's seniority ladder baked into the type system;
+// "Article" is specific to Indian chartered accountancy and meaningless
+// elsewhere. It is now free text on User, because nothing in the engine
+// branches on it: it is displayed, and it will seed default capacity hours
+// when the capacity model arrives. An organisation types whatever it calls
+// its levels.
 
 enum UserStatus {
   PENDING // signed in via Entra, awaiting admin approval
@@ -83,9 +80,23 @@ enum Priority {
   LOW
 }
 
+/// How binding a deadline is — the ONLY thing the engine needs to know about
+/// a date, and therefore the only part that is not configurable.
+///
+/// The organisation supplies the LABELS via terminology config: a CA firm
+/// calls EXTERNAL_FIXED a "Statutory deadline", a software company calls it a
+/// "Contractual SLA", an agency calls it a "Client promise". The engine only
+/// cares whether the date can be moved and how loudly to escalate it.
+///
+/// Previously these were STATUTORY and CLIENT_COMMITTED, which made a CA
+/// firm's regulatory calendar part of the type system.
 enum DueDateType {
-  STATUTORY // fixed by law; movable only by Admin, with a reason
-  CLIENT_COMMITTED
+  /// Set outside the organisation and not ours to move — a filing deadline,
+  /// a contractual date. Acts as a ceiling the internal due date cannot pass.
+  EXTERNAL_FIXED
+  /// Promised to someone outside the team. Movable, but not casually.
+  COMMITTED
+  /// The organisation's own target. Freely movable by whoever may set deadlines.
   INTERNAL
 }
 
@@ -256,8 +267,10 @@ model User {
   entraObjectId String?    @unique @map("entra_object_id")
   email         String     @unique
   name          String
-  grade         Grade      @default(EXECUTIVE)
-  status        UserStatus @default(PENDING)
+  /// Free text: "Senior", "Executive", "Article", "Grade 4", whatever the
+  /// organisation calls its levels. Nothing branches on it.
+  grade  String?
+  status UserStatus @default(PENDING)
 
   organizationId BigInt       @map("organization_id")
   organization   Organization @relation(fields: [organizationId], references: [id])
@@ -460,9 +473,13 @@ model Task {
   /// The internal commitment. Always present.
   dueDate     DateTime    @map("due_date") @db.Date
   dueDateType DueDateType @default(INTERNAL) @map("due_date_type")
-  /// Where the law fixes a date. A manager may move dueDate but never past
-  /// this — enforced by a CHECK constraint, not just by the service layer.
-  statutoryDueDate DateTime? @map("statutory_due_date") @db.Date
+  /// A date set outside the organisation — a statutory filing deadline, a
+  /// contractual SLA. Acts as a CEILING: dueDate can never be moved past it,
+  /// enforced by a CHECK constraint rather than only by the service layer.
+  ///
+  /// Named for what it IS (external, fixed) rather than for one industry's
+  /// instance of it. Was `statutoryDueDate`.
+  externalDeadline DateTime? @map("external_deadline") @db.Date
 
   /// Frozen at the first time entry so Estimated-vs-Actual compares like with
   /// like. Never used for individual scoring (Build Spec §6).
@@ -725,7 +742,10 @@ model RecurrenceRule {
   estimateMinutes   Int?    @map("estimate_minutes")
   priority          Priority    @default(NORMAL)
   reviewRequired    Boolean?    @map("review_required")
-  dueDateType       DueDateType @default(STATUTORY) @map("due_date_type")
+  // Recurring work is usually driven by an external calendar — a filing
+  // deadline, a contractual cycle. An organisation with only internal
+  // recurrence overrides this per rule.
+  dueDateType DueDateType @default(EXTERNAL_FIXED) @map("due_date_type")
 
   frequency RecurrenceFrequency
   /// Which months a quarterly/annual rule fires in (1-12). Empty = every period.

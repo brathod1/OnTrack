@@ -35,7 +35,28 @@ function isoDate(offsetDays = 0): string {
   return d.toISOString().slice(0, 10);
 }
 
-export function QuickCreate({ options }: { options: CreateOptions }) {
+/**
+ * Labels resolved by the server page and passed down.
+ *
+ * A client component cannot read the organisation's terminology itself — it
+ * has no database access — so the words arrive as props. That is the right
+ * shape anyway: this component renders a form, it should not be deciding what
+ * things are called.
+ */
+export interface QuickCreateLabels {
+  engagement: string;
+  externalDeadline: string;
+  committedDeadline: string;
+  internalDeadline: string;
+}
+
+export function QuickCreate({
+  options,
+  labels,
+}: {
+  options: CreateOptions;
+  labels: QuickCreateLabels;
+}) {
   const [open, setOpen] = useState(false);
   const [showMore, setShowMore] = useState(false);
   /**
@@ -182,7 +203,7 @@ export function QuickCreate({ options }: { options: CreateOptions }) {
                 </Field>
 
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Engagement" error={state?.fieldErrors?.engagementId}>
+                  <Field label={labels.engagement} error={state?.fieldErrors?.engagementId}>
                     <select
                       name="engagementId"
                       required
@@ -277,9 +298,9 @@ export function QuickCreate({ options }: { options: CreateOptions }) {
                           defaultValue="INTERNAL"
                           className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
                         >
-                          <option value="INTERNAL">Internal</option>
-                          <option value="CLIENT_COMMITTED">Client committed</option>
-                          <option value="STATUTORY">Statutory</option>
+                          <option value="INTERNAL">{labels.internalDeadline}</option>
+                          <option value="COMMITTED">{labels.committedDeadline}</option>
+                          <option value="EXTERNAL_FIXED">{labels.externalDeadline}</option>
                         </select>
                       </Field>
                     </div>

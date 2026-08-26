@@ -35,7 +35,7 @@ export const GET = route<Ctx>(async (user, _request, { params }) => {
 
     dueDate: task.dueDate,
     dueDateType: task.dueDateType,
-    statutoryDueDate: task.statutoryDueDate,
+    externalDeadline: task.externalDeadline,
 
     originalEstimateMinutes: task.originalEstimateMinutes,
     currentEstimateMinutes: task.currentEstimateMinutes,

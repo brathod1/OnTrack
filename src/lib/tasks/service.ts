@@ -167,7 +167,7 @@ export async function createTask(user: ActingUser, input: CreateTaskInput) {
         priority: input.priority,
         dueDate: input.dueDate,
         dueDateType: input.dueDateType,
-        statutoryDueDate: input.statutoryDueDate ?? null,
+        externalDeadline: input.externalDeadline ?? null,
         originalEstimateMinutes: input.estimateMinutes ?? null,
         currentEstimateMinutes: input.estimateMinutes ?? null,
       },
@@ -289,7 +289,7 @@ export async function updateTask(user: ActingUser, taskId: bigint, input: Update
   change("description", input.description, task.description);
   change("priority", input.priority, task.priority);
   change("dueDateType", input.dueDateType, task.dueDateType);
-  change("statutoryDueDate", input.statutoryDueDate, task.statutoryDueDate);
+  change("externalDeadline", input.externalDeadline, task.externalDeadline);
   change("reviewerId", input.reviewerId, task.reviewerId);
   change("currentEstimateMinutes", input.currentEstimateMinutes, task.currentEstimateMinutes);
 
@@ -299,10 +299,10 @@ export async function updateTask(user: ActingUser, taskId: bigint, input: Update
     if (!input.reason?.trim()) {
       throw new InvalidOperationError("Moving a deadline requires a reason.");
     }
-    const ceiling = input.statutoryDueDate ?? task.statutoryDueDate;
+    const ceiling = input.externalDeadline ?? task.externalDeadline;
     if (ceiling && input.dueDate > ceiling) {
       throw new InvalidOperationError(
-        "The due date cannot be moved past the statutory deadline."
+        "The due date cannot be moved past the external deadline."
       );
     }
     change("dueDate", input.dueDate, task.dueDate);

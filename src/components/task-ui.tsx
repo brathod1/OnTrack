@@ -71,10 +71,18 @@ export function DueDate({
   date,
   type,
   done,
+  externalLabel = "Stat",
 }: {
   date: Date;
   type?: DueDateType;
   done?: boolean;
+  /**
+   * What this organisation calls a fixed external deadline, in its short
+   * form. "Stat" for a CA firm, "SLA" for a software company. Passed in
+   * rather than looked up here, because this is a presentational component
+   * and should not reach the database.
+   */
+  externalLabel?: string;
 }) {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
@@ -82,7 +90,10 @@ export function DueDate({
 
   const iso = date.toISOString().slice(0, 10);
   const overdue = days < 0 && !done;
-  const statutory = type === "STATUTORY";
+  // A date set outside the organisation. The LABEL comes from terminology
+  // config — a CA firm calls it "Statutory", a software company "SLA" — but
+  // the engine only knows that it cannot be moved.
+  const external = type === "EXTERNAL_FIXED";
 
   let label: string;
   if (days === 0) label = "Today";
@@ -94,16 +105,16 @@ export function DueDate({
 
   return (
     <span
-      title={statutory ? `${iso} — statutory deadline` : iso}
+      title={external ? `${iso} — ${externalLabel}` : iso}
       className={`tabular whitespace-nowrap text-sm ${
         overdue ? "font-semibold text-red-700" : "text-slate-600"
       }`}
     >
-      {/* A statutory date is fixed by law, not by a manager. Marking it
-          visibly stops people treating every date as negotiable. */}
-      {statutory && (
+      {/* An external date is not the manager's to move. Marking it visibly
+          stops people treating every date as negotiable. */}
+      {external && (
         <span className="mr-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">
-          Stat
+          {externalLabel}
         </span>
       )}
       {label}

@@ -48,7 +48,7 @@ export const createTaskSchema = z
 
     dueDate: dateOnlySchema,
     dueDateType: z.nativeEnum(DueDateType).default(DueDateType.INTERNAL),
-    statutoryDueDate: dateOnlySchema.optional(),
+    externalDeadline: dateOnlySchema.optional(),
 
     priority: z.nativeEnum(Priority).default(Priority.NORMAL),
 
@@ -62,8 +62,8 @@ export const createTaskSchema = z
     message: "a task cannot be reviewed by the person doing it",
     path: ["reviewerId"],
   })
-  .refine((v) => !v.statutoryDueDate || v.dueDate <= v.statutoryDueDate, {
-    message: "the due date cannot be later than the statutory deadline",
+  .refine((v) => !v.externalDeadline || v.dueDate <= v.externalDeadline, {
+    message: "the due date cannot be later than the external deadline",
     path: ["dueDate"],
   });
 
@@ -85,7 +85,7 @@ export const updateTaskSchema = z.object({
   priority: z.nativeEnum(Priority).optional(),
   dueDate: dateOnlySchema.optional(),
   dueDateType: z.nativeEnum(DueDateType).optional(),
-  statutoryDueDate: dateOnlySchema.nullable().optional(),
+  externalDeadline: dateOnlySchema.nullable().optional(),
   reviewerId: idSchema.nullable().optional(),
   reviewRequired: z.boolean().optional(),
   currentEstimateMinutes: estimateSchema.nullable().optional(),

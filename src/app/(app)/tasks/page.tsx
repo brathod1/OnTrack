@@ -20,6 +20,7 @@ import {
 } from "@/components/task-ui";
 import { QuickCreate } from "@/components/quick-create";
 import { getCreateOptions } from "@/lib/tasks/create-options";
+import { getTerminology } from "@/lib/org/terminology";
 
 export const metadata: Metadata = { title: "My work" };
 export const runtime = "nodejs";
@@ -43,10 +44,20 @@ export const dynamic = "force-dynamic";
  */
 export default async function MyWorkPage() {
   const actor = await requireActingUser();
-  const [{ bands, counts }, createOptions] = await Promise.all([
+  const [{ bands, counts }, createOptions, terms] = await Promise.all([
     getMyWork(actor),
     getCreateOptions(actor),
+    getTerminology(),
   ]);
+
+  // Resolved once here and threaded down, so the presentational components
+  // never reach the database themselves.
+  const labels = {
+    engagement: terms.t("engagement"),
+    externalDeadline: terms.short("externalDeadline"),
+    committedDeadline: terms.short("committedDeadline"),
+    internalDeadline: terms.short("internalDeadline"),
+  };
 
   return (
     <main>
@@ -60,7 +71,7 @@ export default async function MyWorkPage() {
                 : `${counts.total} open ${counts.total === 1 ? "task" : "tasks"}`}
             </p>
           </div>
-          <QuickCreate options={createOptions} />
+          <QuickCreate options={createOptions} labels={labels} />
         </div>
 
         {counts.total > 0 && (
@@ -107,7 +118,12 @@ export default async function MyWorkPage() {
               </h2>
               <ul className="overflow-hidden rounded-lg border border-slate-200 bg-white">
                 {tasks.map((task) => (
-                  <TaskRow key={task.displayKey} task={task} currentUserId={actor.id} />
+                  <TaskRow
+                    key={task.displayKey}
+                    task={task}
+                    currentUserId={actor.id}
+                    externalLabel={labels.externalDeadline}
+                  />
                 ))}
               </ul>
             </section>
@@ -135,7 +151,15 @@ function Metric({ label, value, tone }: { label: string; value: number; tone?: s
  * one of the screens people genuinely open on a phone — in a client's
  * reception, between meetings.
  */
-function TaskRow({ task, currentUserId }: { task: MyWorkTask; currentUserId: bigint }) {
+function TaskRow({
+  task,
+  currentUserId,
+  externalLabel,
+}: {
+  task: MyWorkTask;
+  currentUserId: bigint;
+  externalLabel: string;
+}) {
   const mine = task.assigneeId === currentUserId;
   const isSubtask = task.parentTaskId !== null;
   const parent = isParent(task);
@@ -219,7 +243,11 @@ function TaskRow({ task, currentUserId }: { task: MyWorkTask; currentUserId: big
           )}
           <StatusBadge status={task.status} />
           <div className="w-24 text-right sm:w-28">
-            <DueDate date={task.dueDate} type={task.dueDateType} />
+            <DueDate
+              date={task.dueDate}
+              type={task.dueDateType}
+              externalLabel={externalLabel}
+            />
           </div>
         </div>
       </Link>

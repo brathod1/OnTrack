@@ -270,7 +270,7 @@ export type WritableField =
   | "priority"
   | "dueDate"
   | "dueDateType"
-  | "statutoryDueDate"
+  | "externalDeadline"
   | "assigneeId"
   | "reviewerId"
   | "currentEstimateMinutes"
@@ -309,11 +309,10 @@ export function canWriteField(
     case "dueDateType":
       return manages && can(user, CAP.TASK_SET_DEADLINE);
 
-    // A date the organisation does not control — a statutory filing deadline,
-    // a contractual SLA. Getting it wrong has consequences outside this
-    // system, so it carries its own capability rather than riding on
-    // task.set_deadline.
-    case "statutoryDueDate":
+    // A date the organisation does not control — a filing deadline, a
+    // contractual SLA. Getting it wrong has consequences outside this system,
+    // so it carries its own capability rather than riding on task.set_deadline.
+    case "externalDeadline":
       return can(user, CAP.TASK_SET_EXTERNAL_DEADLINE);
 
     case "title":

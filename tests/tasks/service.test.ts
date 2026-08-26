@@ -242,10 +242,14 @@ describe("updateTask", () => {
     expect(entry?.newValue).toBe("2027-01-31T00:00:00.000Z");
   });
 
-  it("refuses to move a due date past its statutory ceiling", async () => {
+  it("refuses to move a due date past its external deadline", async () => {
     const task = await createTask(
       actor.meera!,
-      newTaskInput({ dueDate: "2026-12-20", statutoryDueDate: "2026-12-31", dueDateType: "STATUTORY" })
+      newTaskInput({
+        dueDate: "2026-12-20",
+        externalDeadline: "2026-12-31",
+        dueDateType: "EXTERNAL_FIXED",
+      })
     );
 
     await expect(

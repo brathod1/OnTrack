@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireActingUser, getSessionUser } from "@/lib/auth/session";
 import { canOverseeOthers, canViewAllTasks } from "@/lib/auth/permissions";
+import { getTerminology } from "@/lib/org/terminology";
 import { signOut } from "@/lib/auth/auth";
 
 export const runtime = "nodejs";
@@ -22,6 +23,9 @@ export const dynamic = "force-dynamic";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const actor = await requireActingUser();
   const session = await getSessionUser();
+  // "Clients" for a CA firm, "Customers" or "Projects" elsewhere. The nav
+  // reads from configuration rather than from a string literal here.
+  const terms = await getTerminology();
 
   const canSeeAll = canViewAllTasks(actor);
   // A capability question, not "is this person senior enough". An organisation
@@ -45,8 +49,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <nav className="flex flex-1 items-center gap-1 overflow-x-auto" aria-label="Main">
             <NavLink href="/tasks">My work</NavLink>
             {showTeamView && <NavLink href="/team">Team</NavLink>}
-            <NavLink href="/clients">Clients</NavLink>
-            {canSeeAll && <NavLink href="/tasks/all">All tasks</NavLink>}
+            <NavLink href="/clients">{terms.plural("client")}</NavLink>
+            {canSeeAll && <NavLink href="/tasks/all">All {terms.plural("task").toLowerCase()}</NavLink>}
           </nav>
 
           <div className="flex items-center gap-3">

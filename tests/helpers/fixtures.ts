@@ -30,7 +30,7 @@
  * ─────────────────────────────────────────────────────────────────────────
  */
 
-import { EngagementCapacity, Grade, TaskStatus, UserStatus } from "@prisma/client";
+import { EngagementCapacity, TaskStatus, UserStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { DEFAULT_ROLES } from "@/lib/auth/capabilities";
 
@@ -112,7 +112,7 @@ export async function buildFirm(): Promise<Firm> {
     email: string,
     name: string,
     roleKey: string,
-    grade: Grade,
+    grade: string,
     teamId?: bigint,
     reportsToId?: bigint
   ) =>
@@ -131,16 +131,16 @@ export async function buildFirm(): Promise<Firm> {
 
   // .invalid is reserved by RFC 2606 and can never be a real domain, so these
   // addresses cannot collide with a real person if fixtures ever leak.
-  const admin = await mk("admin@example.invalid", "Ada Admin", "admin", Grade.DIRECTOR);
-  const priya = await mk("priya@example.invalid", "Priya Partner", "partner", Grade.PARTNER);
-  const quentin = await mk("quentin@example.invalid", "Quentin Partner", "partner", Grade.PARTNER);
-  const meera = await mk("meera@example.invalid", "Meera Manager", "senior", Grade.MANAGER, tax.id);
-  const nikhil = await mk("nikhil@example.invalid", "Nikhil Manager", "senior", Grade.MANAGER, audit.id);
+  const admin = await mk("admin@example.invalid", "Ada Admin", "admin", "Director");
+  const priya = await mk("priya@example.invalid", "Priya Partner", "partner", "Partner");
+  const quentin = await mk("quentin@example.invalid", "Quentin Partner", "partner", "Partner");
+  const meera = await mk("meera@example.invalid", "Meera Manager", "senior", "Manager", tax.id);
+  const nikhil = await mk("nikhil@example.invalid", "Nikhil Manager", "senior", "Manager", audit.id);
 
-  const eshan = await mk("eshan@example.invalid", "Eshan Exec", "staff", Grade.SENIOR, tax.id, meera.id);
-  const esha = await mk("esha@example.invalid", "Esha Exec", "staff", Grade.EXECUTIVE, tax.id, meera.id);
-  const ellie = await mk("ellie@example.invalid", "Ellie Exec", "staff", Grade.EXECUTIVE, audit.id, nikhil.id);
-  const chandra = await mk("chandra@example.invalid", "Chandra Contractor", "staff", Grade.EXECUTIVE);
+  const eshan = await mk("eshan@example.invalid", "Eshan Exec", "staff", "Senior", tax.id, meera.id);
+  const esha = await mk("esha@example.invalid", "Esha Exec", "staff", "Executive", tax.id, meera.id);
+  const ellie = await mk("ellie@example.invalid", "Ellie Exec", "staff", "Executive", audit.id, nikhil.id);
+  const chandra = await mk("chandra@example.invalid", "Chandra Contractor", "staff", "Executive");
 
   const clientA = await prisma.client.create({
     data: {

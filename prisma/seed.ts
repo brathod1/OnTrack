@@ -27,7 +27,6 @@
 import {
   ActivityAction,
   EngagementCapacity,
-  Grade,
   NotificationType,
   PrismaClient,
   Priority,
@@ -201,8 +200,9 @@ async function main() {
 
   // ── People ───────────────────────────────────────────────────────────────
   // Deliberately named so their role is obvious at a glance in the UI.
+  // `grade` is free text now: this firm's seniority ladder, not the engine's.
   const mk = (
-    email: string, name: string, roleKey: string, grade: Grade,
+    email: string, name: string, roleKey: string, grade: string,
     teamId?: bigint, reportsToId?: bigint
   ) =>
     db.user.create({
@@ -216,24 +216,25 @@ async function main() {
       },
     });
 
-  const aarti = await mk("admin@demo.invalid", "Aarti Admin", "admin", Grade.DIRECTOR, admin_.id);
-  const raghav = await mk("partner.rao@demo.invalid", "Raghav Rao", "partner", Grade.PARTNER);
-  const sneha = await mk("partner.shah@demo.invalid", "Sneha Shah", "partner", Grade.PARTNER);
+  const aarti = await mk("admin@demo.invalid", "Aarti Admin", "admin", "Director", admin_.id);
+  const raghav = await mk("partner.rao@demo.invalid", "Raghav Rao", "partner", "Partner");
+  const sneha = await mk("partner.shah@demo.invalid", "Sneha Shah", "partner", "Partner");
 
-  const kavya = await mk("manager.iyer@demo.invalid", "Kavya Iyer", "senior", Grade.MANAGER, directTax.id);
-  const rohit = await mk("manager.desai@demo.invalid", "Rohit Desai", "senior", Grade.MANAGER, audit.id);
+  const kavya = await mk("manager.iyer@demo.invalid", "Kavya Iyer", "senior", "Manager", directTax.id);
+  const rohit = await mk("manager.desai@demo.invalid", "Rohit Desai", "senior", "Manager", audit.id);
 
-  const anjali = await mk("exec.nair@demo.invalid", "Anjali Nair", "staff", Grade.SENIOR, directTax.id, kavya.id);
-  const vikram = await mk("exec.gupta@demo.invalid", "Vikram Gupta", "staff", Grade.EXECUTIVE, gst.id, kavya.id);
-  const divya = await mk("exec.menon@demo.invalid", "Divya Menon", "staff", Grade.EXECUTIVE, audit.id, rohit.id);
-  const karan = await mk("article.jain@demo.invalid", "Karan Jain", "staff", Grade.ARTICLE, audit.id, rohit.id);
+  const anjali = await mk("exec.nair@demo.invalid", "Anjali Nair", "staff", "Senior", directTax.id, kavya.id);
+  const vikram = await mk("exec.gupta@demo.invalid", "Vikram Gupta", "staff", "Executive", gst.id, kavya.id);
+  const divya = await mk("exec.menon@demo.invalid", "Divya Menon", "staff", "Executive", audit.id, rohit.id);
+  // "Article" is an articled clerk — this firm's term, now just a string.
+  const karan = await mk("article.jain@demo.invalid", "Karan Jain", "staff", "Article", audit.id, rohit.id);
 
   // Someone who has signed in via Entra but not yet been approved. Exists so
   // the admin approval queue has something in it from day one.
   await db.user.create({
     data: {
       email: "newjoiner@demo.invalid", name: "Pending Newjoiner",
-      roleId: roleId("staff"), grade: Grade.EXECUTIVE, status: UserStatus.PENDING,
+      roleId: roleId("staff"), grade: "Executive", status: UserStatus.PENDING,
       organizationId: org.id,
     },
   });
@@ -242,7 +243,7 @@ async function main() {
   await db.user.create({
     data: {
       email: "former.staff@demo.invalid", name: "Former Staff",
-      roleId: roleId("staff"), grade: Grade.EXECUTIVE, status: UserStatus.INACTIVE,
+      roleId: roleId("staff"), grade: "Executive", status: UserStatus.INACTIVE,
       organizationId: org.id,
       teamId: audit.id, reportsToId: rohit.id, deactivatedAt: hoursAgo(24 * 40),
     },
@@ -338,7 +339,7 @@ async function main() {
     estimate?: number;
     actual?: number;
     dueDateType?: DueDateType;
-    statutoryOffset?: number;
+    externalDeadlineOffset?: number;
     blockedReason?: string;
     description?: string;
     startedDaysAgo?: number;
@@ -354,7 +355,7 @@ async function main() {
     {
       title: "GSTR-3B — July 2026",
       engagementId: orchidGst.id, createdById: kavya.id, assigneeId: vikram.id,
-      dueOffset: -6, statutoryOffset: -6, dueDateType: DueDateType.STATUTORY,
+      dueOffset: -6, externalDeadlineOffset:-6, dueDateType: DueDateType.EXTERNAL_FIXED,
       status: TaskStatus.IN_PROGRESS, priority: Priority.CRITICAL,
       reviewerId: kavya.id, estimate: hours(3), actual: hours(4.5),
       startedDaysAgo: 8, tagIds: [urgent.id],
@@ -363,7 +364,7 @@ async function main() {
     {
       title: "TDS return 26Q — Q1 FY 2026-27",
       engagementId: vertexTax.id, createdById: kavya.id, assigneeId: anjali.id,
-      dueOffset: -2, statutoryOffset: -2, dueDateType: DueDateType.STATUTORY,
+      dueOffset: -2, externalDeadlineOffset:-2, dueDateType: DueDateType.EXTERNAL_FIXED,
       status: TaskStatus.REVIEW, priority: Priority.HIGH,
       reviewerId: kavya.id, estimate: hours(4), actual: hours(5.25),
       startedDaysAgo: 5, tagIds: [urgent.id],
@@ -395,7 +396,7 @@ async function main() {
     {
       title: "GSTR-1 — August 2026",
       engagementId: orchidGst.id, createdById: kavya.id, assigneeId: vikram.id,
-      dueOffset: 4, statutoryOffset: 4, dueDateType: DueDateType.STATUTORY,
+      dueOffset: 4, externalDeadlineOffset:4, dueDateType: DueDateType.EXTERNAL_FIXED,
       status: TaskStatus.ASSIGNED, priority: Priority.HIGH,
       reviewerId: kavya.id, estimate: hours(2.5),
     },
@@ -444,7 +445,7 @@ async function main() {
     {
       title: "ROC filing — AOC-4",
       engagementId: orchidAudit.id, createdById: rohit.id, assigneeId: divya.id,
-      dueOffset: 22, statutoryOffset: 25, dueDateType: DueDateType.STATUTORY,
+      dueOffset: 22, externalDeadlineOffset:25, dueDateType: DueDateType.EXTERNAL_FIXED,
       status: TaskStatus.ASSIGNED, priority: Priority.NORMAL,
       reviewerId: rohit.id, estimate: hours(2),
     },
@@ -460,14 +461,14 @@ async function main() {
     {
       title: "GSTR-3B — June 2026",
       engagementId: orchidGst.id, createdById: kavya.id, assigneeId: vikram.id,
-      dueOffset: -36, statutoryOffset: -36, dueDateType: DueDateType.STATUTORY,
+      dueOffset: -36, externalDeadlineOffset:-36, dueDateType: DueDateType.EXTERNAL_FIXED,
       status: TaskStatus.COMPLETED, reviewerId: kavya.id,
       estimate: hours(3), actual: hours(2.5), startedDaysAgo: 40, completedDaysAgo: 37,
     },
     {
       title: "GSTR-1 — July 2026",
       engagementId: orchidGst.id, createdById: kavya.id, assigneeId: vikram.id,
-      dueOffset: -16, statutoryOffset: -16, dueDateType: DueDateType.STATUTORY,
+      dueOffset: -16, externalDeadlineOffset:-16, dueDateType: DueDateType.EXTERNAL_FIXED,
       status: TaskStatus.COMPLETED, reviewerId: kavya.id,
       estimate: hours(2.5), actual: hours(4), startedDaysAgo: 20, completedDaysAgo: 17,
     },
@@ -509,7 +510,7 @@ async function main() {
     {
       title: "GST annual return — GSTR-9 & 9C FY 2025-26",
       engagementId: orchidGst.id, createdById: kavya.id, assigneeId: vikram.id,
-      dueOffset: 40, statutoryOffset: 45, dueDateType: DueDateType.STATUTORY,
+      dueOffset: 40, externalDeadlineOffset:45, dueDateType: DueDateType.EXTERNAL_FIXED,
       status: TaskStatus.IN_PROGRESS, priority: Priority.HIGH,
       reviewerId: kavya.id, estimate: hours(4), actual: hours(1), startedDaysAgo: 3,
       parentOf: [
@@ -540,7 +541,8 @@ async function main() {
         priority: s.priority ?? Priority.NORMAL,
         dueDate: day(s.dueOffset),
         dueDateType: s.dueDateType ?? DueDateType.INTERNAL,
-        statutoryDueDate: s.statutoryOffset === undefined ? null : day(s.statutoryOffset),
+        externalDeadline:
+          s.externalDeadlineOffset === undefined ? null : day(s.externalDeadlineOffset),
         originalEstimateMinutes: s.estimate ?? null,
         currentEstimateMinutes: s.estimate ?? null,
         actualMinutes: s.actual ?? 0,

@@ -31,7 +31,8 @@ export interface PersonOption {
   id: string;
   name: string;
   teamName: string | null;
-  grade: string;
+  /** Free text since G5, and optional — not every organisation uses levels. */
+  grade: string | null;
   openTasks: number;
   remainingMinutes: number;
   overdueTasks: number;

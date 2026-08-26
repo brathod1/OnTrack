@@ -112,11 +112,14 @@ describe("protected fields", () => {
     expect(canWriteField(actor.meera!, c, "assigneeId")).toBe(true);
   });
 
-  it("only an admin can move a statutory due date — it is a matter of law", async () => {
+  it("only an admin can move an external deadline — it is not ours to move", async () => {
+    // A date set outside the organisation: a statutory filing deadline for
+    // this firm, a contractual SLA for another. Either way, moving it is not
+    // a management decision, so it carries its own capability.
     const c = await ctx(firm.tasks.t1, firm.users.meera);
-    expect(canWriteField(actor.meera!, c, "statutoryDueDate")).toBe(false);
-    expect(canWriteField(actor.priya!, c, "statutoryDueDate")).toBe(false);
-    expect(canWriteField(actor.admin!, c, "statutoryDueDate")).toBe(true);
+    expect(canWriteField(actor.meera!, c, "externalDeadline")).toBe(false);
+    expect(canWriteField(actor.priya!, c, "externalDeadline")).toBe(false);
+    expect(canWriteField(actor.admin!, c, "externalDeadline")).toBe(true);
   });
 
   it("the assignee owns the state of their own work", async () => {
