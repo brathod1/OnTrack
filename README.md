@@ -130,15 +130,74 @@ declared purely so migrations leave them alone.
 
 ---
 
+## Testing
+
+```powershell
+npm test              # run once
+npm run test:watch    # re-run on change
+```
+
+### One-time setup of the test database
+
+```powershell
+psql -U postgres -h localhost -d postgres -c "CREATE DATABASE ontrack_test OWNER ontrack_owner ENCODING 'UTF8';"
+
+# Point Prisma at it without typing a password
+function Get-EnvValue($name) {
+  $line = Get-Content .env | Where-Object { $_ -match "^$name=" } | Select-Object -First 1
+  return ($line -replace "^$name=", '').Trim('"')
+}
+$env:DATABASE_URL        = (Get-EnvValue 'DATABASE_URL')        -replace '/ontrack\?', '/ontrack_test?'
+$env:DIRECT_DATABASE_URL = (Get-EnvValue 'DIRECT_DATABASE_URL') -replace '/ontrack\?', '/ontrack_test?'
+
+npx prisma migrate deploy
+psql -U postgres -h localhost -d ontrack_test -f "prisma\sql\02_grants.sql"
+
+Remove-Item Env:DATABASE_URL, Env:DIRECT_DATABASE_URL -ErrorAction SilentlyContinue
+npx prisma migrate status     # must report database "ontrack"
+```
+
+### How the harness protects your development data
+
+There is **no `.env.test` file**. `tests/setup.ts` reads the existing `.env` and
+substitutes the database name, so passwords live in one place and cannot drift.
+Two independent interlocks then apply:
+
+1. **setup.ts** refuses to start if the derived URL doesn't name `ontrack_test`.
+2. **helpers/db.ts** re-checks `current_database()` immediately before every
+   `TRUNCATE`. A connection string can be right while the connection goes
+   somewhere else — a stale env var, a pooler, a host alias.
+
+`fileParallelism` is off: test files share one database and truncate between
+cases. In parallel, one file's truncate deletes another's fixtures mid-assertion,
+producing failures that move between runs and look like flaky application code.
+
+### What the suites cover
+
+| File | Covers |
+|---|---|
+| `smoke.test.ts` | The harness itself — right database, right role, schema present, both timer protections installed, no `timestamp without time zone` anywhere |
+| `permissions/visibility.test.ts` | Who can see which tasks; cross-team staffing; **404-not-403** on unauthorised lookup; deactivated users |
+| `permissions/write-access.test.ts` | Protected fields, estimate freezing, who may log time, status transitions |
+| `timer/race.test.ts` | 12 simultaneous timer starts → exactly one wins; suspended and soft-deleted timers; overlapping sessions |
+| `grants.test.ts` | The **database** grants, via a second client on the restricted `ontrack_app` connection |
+
+Tests connect as `ontrack_owner` because fixtures need teardown and the app role
+deliberately has no DELETE. `grants.test.ts` is the exception, and exists so the
+two layers — application kernel and database privileges — stay independently
+verifiable. A failure in one is then unambiguous.
+
+---
+
 ## Outstanding verification
 
-- **Timer concurrency under true parallelism.** `04_timer_tests.sql` proves the
-  constraint rejects a second running timer, and manual two-session testing
-  confirmed the rejection — but not the *blocking* behaviour while two
-  transactions are in flight, because coordinating two psql windows mid-
-  transaction proved unreliable. **To be covered by an automated two-connection
-  race test in Stage 3.** The guarantee itself rests on the partial unique index,
-  which is verified present with the correct predicate by `03_verify.sql` §3.
+- ~~Timer concurrency under true parallelism~~ — **closed in Stage 3.**
+  `tests/timer/race.test.ts` fires 12 simultaneous starts through the connection
+  pool and asserts exactly one succeeds, with the losers rejected specifically by
+  `uniq_running_timer_per_user` rather than by a pool timeout or deadlock. The
+  earlier manual two-psql-window attempt was abandoned: coordinating a held-open
+  transaction across two windows proved unreliable, and both attempts silently
+  re-tested the sequential case.
 
 ---
 

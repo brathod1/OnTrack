@@ -33,6 +33,6 @@
   // next-env.d.ts is deliberately absent from `include` for now — Next.js
   // generates it on first `next dev`, and listing a file that doesn't exist
   // makes `tsc --noEmit` fail. It gets added when the app is scaffolded.
-  "include": ["src/**/*.ts", "src/**/*.tsx", "prisma/**/*.ts", "*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "prisma/**/*.ts", "tests/**/*.ts", "*.ts"],
   "exclude": ["node_modules", ".next"]
 }

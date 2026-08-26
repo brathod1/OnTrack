@@ -9,11 +9,28 @@ import { PrismaClient } from "@prisma/client";
  */
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
+/**
+ * Log levels by environment.
+ *
+ * Tests are silent by design. Much of the suite deliberately provokes
+ * constraint violations — a second timer, an overlapping session, an app-role
+ * write to the activity log — and Prisma logs each one as a multi-line error
+ * block. Twenty such blocks for a passing run buries the one that matters when
+ * something genuinely breaks. Vitest sets NODE_ENV=test automatically.
+ */
+function logLevels(): ("query" | "warn" | "error")[] {
+  switch (process.env.NODE_ENV) {
+    case "test":
+      return [];
+    case "development":
+      return ["query", "warn", "error"];
+    default:
+      return ["warn", "error"];
+  }
+}
+
 export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["query", "warn", "error"] : ["warn", "error"],
-  });
+  globalForPrisma.prisma ?? new PrismaClient({ log: logLevels() });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
