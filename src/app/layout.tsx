@@ -22,7 +22,22 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en-IN">
-      <body className="min-h-screen">{children}</body>
+      {/*
+        suppressHydrationWarning is on <body> deliberately and narrowly.
+
+        Browser extensions — Grammarly, password managers, ad blockers —
+        inject attributes into <body> before React hydrates, producing a
+        hydration mismatch that has nothing to do with our code and that we
+        cannot prevent. Suppressing it here is the accepted remedy.
+
+        It applies to THIS element's own attributes only, not to descendants,
+        so a genuine mismatch anywhere inside the page still surfaces. Do not
+        move it to a wrapper div or add it to <html> — that would hide real
+        bugs along with the noise.
+      */}
+      <body className="min-h-screen" suppressHydrationWarning>
+        {children}
+      </body>
     </html>
   );
 }
