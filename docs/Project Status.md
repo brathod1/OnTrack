@@ -1,13 +1,15 @@
 # OnTrack — Project Status
 
-**As at:** 26 August 2026 · **Commit:** `eb570a8` · **Branch:** `main`
-**13 commits · 156 tests passing · 6 migrations · 22 tables**
+**As at:** 27 August 2026 · **Commit:** `508584f` · **Branch:** `main`
+**20 commits · 250 tests passing · 7 migrations · 22 tables**
 
 ---
 
 ## 1. What exists and works today
 
-You can run `npm run dev`, sign in as any of nine seeded people, and see a task list that differs correctly for each of them. That is the honest summary. Below it is a great deal of foundation.
+You can run `npm run dev`, sign in as any of nine seeded people, open a task, move it through its lifecycle, discuss it, run a timer against it, and see the week in a timesheet. The task engine is complete and usable end to end.
+
+What it does not yet do is tell anyone anything — no notifications, no dashboards, no reports. It records work faithfully; it does not yet surface it.
 
 ### Database
 
@@ -28,7 +30,7 @@ You can run `npm run dev`, sign in as any of nine seeded people, and see a task 
 - **Activity log is append-only** — the application's database role has no `UPDATE` or `DELETE` on it
 - Tasks, time entries, comments and users cannot be hard-deleted by the application
 
-**Six real defects have been caught by these constraints during construction**, including two in the Microsoft Entra sign-in path — code that cannot run today and would have failed on the first real sign-in after the app registration is approved.
+**Seven real defects have been caught by these constraints during construction**, including two in the Microsoft Entra sign-in path — code that cannot run today and would have failed on the first real sign-in after the app registration is approved. The seventh was caught while writing the timesheet tests: fixture rows that went around the service to insert nine-hour entries with no note were refused by the database anyway. Going around the service does not mean going around the invariants, which is the entire argument for putting them here.
 
 ### Permissions
 
@@ -48,6 +50,11 @@ Unauthorised reads return **404, never 403**. A 403 would confirm the record exi
 - **Task API** — create, update, assign, transition, block, contributors, list. Optimistic locking on every write; the activity log written inside the same transaction as the change it records
 - **My Work** — one prioritised list (overdue → sent back → due today → awaiting review → blocked → this week → later), not four widgets
 - **Quick create** — four visible fields, `N` to open, Ctrl+Enter to save, stays open for creating in runs. The assignee picker shows each person's current load, so overload is visible *at the moment of delegation*
+- **Task detail** — description, people, dates, estimate vs actual, subtasks, full history in plain sentences
+- **Status workflow** — only the transitions the kernel permits are rendered; reasons are dialogs, not skippable fields; conflicts offer reload, never silent retry
+- **Comments** — 15-minute author edit window, then fixed. Nobody may edit another person's words, manager included. Removal leaves a tombstone, and the original text goes to the activity log
+- **Time tracking** — server-owned timer surviving reloads and devices, manual entry as a first-class path, a duration field that echoes what it understood, and a weekly grid whose empty days are the point
+- **Forgotten-timer watchdog** — `npm run watchdog` (and `--dry-run`). Suspends rather than guessing; a suspended entry counts toward nothing until its owner says what they worked
 
 ### Configuration
 
@@ -70,15 +77,13 @@ Being explicit, because the foundation makes the product look further along than
 
 | Stage | What's missing |
 |---|---|
-| **8** | **Task detail page** — you cannot open a task |
-| **9** | Status workflow UI — no start / submit / approve buttons |
-| **10** | Comments and contributors UI |
-| **11** | Time tracking UI — the timer exists in the database, not on screen |
-| **12** | Notifications |
+| **12** | **Notifications** — nothing reaches anyone. A task assigned to you, a comment mentioning you, and work sent back all happen silently unless you are looking at the screen |
 | **13** | Dashboards — employee and senior |
 | **14** | Filtering and search UI |
-| **15** | Reports and export |
+| **15** | Reports and export — including timesheet approval, which is designed but unbuilt |
 | **16** | Security testing, load testing, deployment |
+
+Stages 8 to 11 are complete. Stage 12 is the sharpest gap: the system now records work faithfully and tells nobody about it.
 
 Also outstanding:
 
@@ -110,6 +115,11 @@ What IT needs to create: a single-tenant app registration, redirect URI `/api/au
 | **Weekly timesheet approval, not per-entry** | Per-entry review is rigorous on paper and rubber-stamped in practice |
 | **Workload counts leaf tasks only** | Counting a parent and its subtasks double-counts the same work |
 | **Forgotten timers are suspended, not auto-logged** | Writing 14 silent hours poisons the data and destroys trust in every number |
+| **The server owns the timer clock** | A browser four minutes fast would show a timer four minutes ahead of what gets recorded, and people believe the display over the ledger |
+| **The watchdog is a plain script, not a queued job** | It is idempotent and its ceiling is ten hours, so a missed run costs nothing. pg-boss earns its place at Stage 12, where notifications genuinely need a queue |
+| **Confirming a suspended timer is not an "edit"** | "Edited a time entry from 0m to 2h 30m" invites exactly the suspicion an append-only log exists to remove |
+| **A timer stopped inside a minute is discarded** | Recording 0m is honest and useless; rounding up invents time |
+| **Reading someone's timesheet needs the same standing as correcting it** | Otherwise the two drift into "can fix what they cannot see" |
 
 ---
 
@@ -120,7 +130,8 @@ What IT needs to create: a single-tenant app registration, redirect URI `/api/au
 | **Adoption** — if logging time takes more than ~20 seconds a day, the system is abandoned | The largest risk, and not a technical one. Quick-create and the weekly grid are the mitigations |
 | **Punitive use of the data** | If estimates or hours feed appraisals, data quality collapses within a quarter. The product deliberately builds no screen that ranks people |
 | **Missing estimates** | A workload figure that silently omits unestimated work is how managers stop trusting the screen. Every figure shows what it could not count |
-| **Duplicate time entry** | If your practice-management software already records time, integrate rather than duplicate — two places to log time means neither gets used. **Still unanswered** |
+| **Duplicate time entry** | **Answered: OnTrack is the sole system of record for time.** Nothing to integrate with, and no second place to log |
+| **A bare number in the time field means hours** | So "45" meaning 45 minutes becomes 45 hours. Large slips are refused past the day ceiling, but a bare "5" becomes five hours and is entirely plausible — no validation can catch it. Mitigated by the field echoing its interpretation as you type. Watch whether real users still get caught |
 
 ---
 
@@ -138,9 +149,13 @@ What IT needs to create: a single-tenant app registration, redirect URI `/api/au
 ```powershell
 cd "D:\Data Backup\OnTrack"
 npm run dev          # http://localhost:3100
-npm test             # 156 tests
+npm test             # 250 tests
 npm run db:seed      # rebuild development data (destructive)
 npm run db:test      # bring the test database up to date after a migration
+npm run watchdog:dry # report timers past the ceiling, writing nothing
+npm run watchdog     # suspend them
 ```
+
+The watchdog needs a scheduler in production — hourly is ample. Which one (Task Scheduler, cron, an Azure WebJob) is a Stage 16 decision; it is a process that exits, so any of them work.
 
 Sign in as any seeded user — `manager.iyer@demo.invalid` and `exec.gupta@demo.invalid` have the most interesting data.
