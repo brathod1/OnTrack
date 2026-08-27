@@ -6,6 +6,7 @@ import { ForbiddenError } from "@/lib/errors";
 import { getCurrentOrganization } from "@/lib/org/current";
 import { formatDuration } from "@/lib/time/duration";
 import { getTimesheet, getTimesheetSubjects } from "@/lib/time/timesheet";
+import { TimesheetPersonPicker } from "@/components/timesheet-person-picker";
 
 export const metadata: Metadata = { title: "Timesheet · OnTrack" };
 
@@ -65,27 +66,14 @@ export default async function TimesheetPage({
 
         <div className="flex items-center gap-2">
           {subjects.length > 0 && (
-            <form className="flex items-center gap-2">
-              <input type="hidden" name="week" value={ISO_DATE(sheet.weekStart)} />
-              <select
-                name="user"
-                defaultValue={sheet.isOwnSheet ? "" : sheet.subject.id.toString()}
-                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-              >
-                <option value="">My timesheet</option>
-                {subjects.map((s) => (
-                  <option key={s.id.toString()} value={s.id.toString()}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="submit"
-                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm hover:bg-slate-100"
-              >
-                Show
-              </button>
-            </form>
+            <TimesheetPersonPicker
+              subjects={subjects.map((s) => ({
+                id: s.id.toString(),
+                name: s.name,
+              }))}
+              selectedId={sheet.isOwnSheet ? "" : sheet.subject.id.toString()}
+              weekStart={ISO_DATE(sheet.weekStart)}
+            />
           )}
 
           <nav className="flex items-center gap-1">
