@@ -311,6 +311,38 @@ export async function stopTimer(user: ActingUser, input: StopTimerInput = {}) {
     );
   }
 
+  // A timer stopped inside a minute is a misclick, not work.
+  //
+  // Recording it as a 0m entry is technically honest and practically useless:
+  // it adds nothing to any total while cluttering the history and every
+  // timesheet row for as long as the record exists, and over years of use
+  // every stray click leaves one behind.
+  //
+  // Rounding UP to a minute would be worse — that invents time, which is the
+  // one thing this whole design refuses to do. So it is discarded the same way
+  // an explicit discard is: soft-deleted, with the reason recorded.
+  if (minutes === 0) {
+    await prisma.$transaction(async (tx) => {
+      await tx.timeEntry.update({
+        where: { id: running.id },
+        data: {
+          endedAt: now,
+          deletedAt: now,
+          deleteReason: "ran for less than a minute",
+        },
+      });
+
+      await recordActivity(tx, {
+        taskId: running.taskId,
+        actorId: user.id,
+        action: ActivityAction.TIME_DELETED,
+        reason: "timer ran for less than a minute, so no time was recorded",
+      });
+    });
+
+    return { discarded: true as const, entry: null };
+  }
+
   return prisma.$transaction(async (tx) => {
     const stopped = await tx.timeEntry.update({
       where: { id: running.id },
@@ -327,7 +359,7 @@ export async function stopTimer(user: ActingUser, input: StopTimerInput = {}) {
       newValue: { minutes },
     });
 
-    return stopped;
+    return { discarded: false as const, entry: stopped };
   });
 }
 
@@ -535,8 +567,10 @@ export async function editTimeEntry(
     await recordActivity(tx, {
       taskId: entry.taskId,
       actorId: user.id,
-      action: ActivityAction.TIME_EDITED,
-      oldValue: { minutes: entry.durationMinutes },
+      // Confirming a suspended timer is not an edit. The entry held no time
+      // to change — its owner is stating what they worked for the first time.
+      action: closesTimer ? ActivityAction.TIMER_CONFIRMED : ActivityAction.TIME_EDITED,
+      oldValue: closesTimer ? null : { minutes: entry.durationMinutes },
       newValue: { minutes: input.minutes },
       reason: input.reason ?? null,
     });

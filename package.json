@@ -18,7 +18,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:permissions": "vitest run src/lib/auth",
-    "jobs": "tsx src/jobs/worker.ts"
+    "watchdog": "tsx src/jobs/timer-watchdog.ts",
+    "watchdog:dry": "tsx src/jobs/timer-watchdog.ts --dry-run"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

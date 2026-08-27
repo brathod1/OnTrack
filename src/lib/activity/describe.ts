@@ -192,6 +192,10 @@ export function describeActivity(
         detail: "it was suspended pending confirmation",
         tone: "warning",
       };
+    case "TIMER_CONFIRMED":
+      // Not "edited". The suspended entry held no time to change; its owner
+      // is stating what they worked, which is a different act entirely.
+      return { verb: "confirmed", detail: to, tone: "neutral" };
 
     case "TIME_LOGGED":
       return { verb: "logged", detail: to, tone: "neutral" };

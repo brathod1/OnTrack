@@ -75,8 +75,31 @@ describe("the running timer", () => {
     });
 
     const stopped = await stopTimer(actor.eshan!);
-    expect(stopped.durationMinutes).toBeGreaterThanOrEqual(44);
-    expect(stopped.durationMinutes).toBeLessThanOrEqual(46);
+    expect(stopped.discarded).toBe(false);
+    expect(stopped.entry!.durationMinutes).toBeGreaterThanOrEqual(44);
+    expect(stopped.entry!.durationMinutes).toBeLessThanOrEqual(46);
+  });
+
+  it("DISCARDS a timer stopped inside a minute rather than writing 0m", async () => {
+    // Recording 0m is honest and useless: it adds nothing to any total while
+    // cluttering the history and every timesheet row forever. Rounding up
+    // would be worse — that invents time.
+    await startTimer(actor.eshan!, firm.tasks.t1);
+    const stopped = await stopTimer(actor.eshan!);
+
+    expect(stopped.discarded).toBe(true);
+
+    const entry = await prisma.timeEntry.findFirst({
+      where: { taskId: firm.tasks.t1, userId: firm.users.eshan },
+    });
+    expect(entry?.deletedAt).not.toBeNull();
+    expect(entry?.deleteReason).toMatch(/less than a minute/);
+
+    const task = await prisma.task.findUniqueOrThrow({ where: { id: firm.tasks.t1 } });
+    expect(task.actualMinutes).toBe(0);
+
+    // And the slot is free — this must not strand the user.
+    expect(await getRunningTimer(firm.users.eshan)).toBeNull();
   });
 
   it("starting a second timer stops the first, in one transaction", async () => {
@@ -405,6 +428,20 @@ describe("the forgotten-timer watchdog", () => {
 
     const task = await prisma.task.findUniqueOrThrow({ where: { id: firm.tasks.t1 } });
     expect(task.actualMinutes).toBe(150);
+
+    // Recorded as a CONFIRMATION, not an edit. A history reading "edited a
+    // time entry from 0m to 2h 30m" invites exactly the suspicion this log
+    // exists to remove — nobody edited anything, and there was no time to
+    // change.
+    const confirmed = await prisma.activityLog.findFirst({
+      where: { taskId: firm.tasks.t1, action: "TIMER_CONFIRMED" },
+    });
+    expect(confirmed).not.toBeNull();
+
+    const edited = await prisma.activityLog.findFirst({
+      where: { taskId: firm.tasks.t1, action: "TIME_EDITED" },
+    });
+    expect(edited).toBeNull();
   });
 
   it("resolving CLOSES the timer and frees the slot", async () => {

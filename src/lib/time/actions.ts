@@ -45,6 +45,8 @@ export interface TimeActionResult {
   stoppedOther?: { taskKey: string; taskTitle: string; minutes: number };
   /** The service wants a note before it will accept this. */
   needsNote?: boolean;
+  /** Succeeded, but something happened the user should know about. */
+  notice?: string;
 }
 
 function translate(e: unknown): TimeActionResult {
@@ -111,10 +113,15 @@ export async function stopTimerAction(
       expectedTaskId: formData.get("taskId") ? String(formData.get("taskId")) : undefined,
     });
 
-    await stopTimer(user, input);
+    const { discarded } = await stopTimer(user, input);
 
     revalidateTimeViews(key);
-    return { ok: true };
+    return {
+      ok: true,
+      notice: discarded
+        ? "That timer ran for less than a minute, so nothing was recorded."
+        : undefined,
+    };
   } catch (e) {
     return translate(e);
   }

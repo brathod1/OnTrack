@@ -127,6 +127,11 @@ enum ActivityAction {
   TIMER_STARTED
   TIMER_STOPPED
   TIMER_SUSPENDED
+  /** A suspended timer resolved by its owner stating what they actually
+   *  worked. Distinct from TIME_EDITED on purpose: nobody edited anything,
+   *  and a history reading "edited a time entry from 0m to 2h 30m" invites
+   *  exactly the suspicion this log exists to remove. */
+  TIMER_CONFIRMED
   TIME_LOGGED
   TIME_EDITED
   TIME_DELETED
