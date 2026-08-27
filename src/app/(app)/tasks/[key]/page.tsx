@@ -20,6 +20,7 @@ import { TaskActions } from "@/components/task-actions";
 import { TaskComments } from "@/components/task-comments";
 import { TaskContributors } from "@/components/task-contributors";
 import { TaskTimer } from "@/components/task-timer";
+import { MarkTaskRead } from "@/components/mark-task-read";
 import { getRunningTimer, localWorkDate } from "@/lib/time/service";
 import { getCurrentOrganization } from "@/lib/org/current";
 import {
@@ -189,6 +190,11 @@ export default async function TaskDetailPage({ params }: Params) {
           rendered from. A write against a stale one is refused with a 409,
           and the user is offered a reload rather than a silent retry.
         */}
+        {/* Renders nothing. Clears this task's notifications once the page is
+            actually on screen — not during server render, which Next.js would
+            also run on link prefetch. */}
+        <MarkTaskRead taskId={task.id.toString()} />
+
         <TaskActions
           taskKey={task.displayKey}
           version={task.updatedAt.toISOString()}

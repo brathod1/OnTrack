@@ -5,6 +5,8 @@ import { getTerminology } from "@/lib/org/terminology";
 import { signOut } from "@/lib/auth/auth";
 import { HeaderTimer } from "@/components/header-timer";
 import { getRunningTimer } from "@/lib/time/service";
+import { NotificationPanel } from "@/components/notification-panel";
+import { countUnread } from "@/lib/notifications/service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,7 +44,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   // A timer you have to go and find is a timer left running, so the clock sits
   // in the shell rather than on one page. One indexed lookup per request.
-  const running = await getRunningTimer(actor.id);
+  const [running, unread] = await Promise.all([
+    getRunningTimer(actor.id),
+    countUnread(actor.id),
+  ]);
 
   async function doSignOut() {
     "use server";
@@ -80,6 +85,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               }
               serverNow={new Date().toISOString()}
             />
+            <NotificationPanel unread={unread} />
             <span className="hidden text-sm text-slate-600 sm:inline">{session?.name}</span>
             <form action={doSignOut}>
               <button
