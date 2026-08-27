@@ -1,6 +1,6 @@
 # OnTrack — Stack and Capability
 
-**As at:** 27 August 2026 · **306 tests passing · 8 migrations · 22 tables**
+**As at:** 27 August 2026 · **358 tests passing · 9 migrations · 22 tables**
 
 Two questions answered here: *what does this software depend on*, and *what can it actually do today*.
 
@@ -73,12 +73,12 @@ Test files run **sequentially, not in parallel** — they share one physical dat
 
 ## Declared but not yet used
 
-Seven dependencies are in `package.json` and appear **nowhere in `src/`**. Each is supply-chain surface and something somebody has to keep patched, so they are listed rather than left to be discovered:
+Six dependencies are in `package.json` and appear **nowhere in `src/`**. Each is supply-chain surface and something somebody has to keep patched, so they are listed rather than left to be discovered. (`exceljs` was on this list until Stage 15 and has been struck through below.)
 
 | Package | Intended for | Status |
 |---|---|---|
 | `pg-boss` | Job queue | Stage 12 decided in-app notifications need no queue — they are written in the same transaction as the change that causes them. It will earn its place when **email** is built, which needs retries against an external service |
-| `exceljs` | Spreadsheet export | Stage 15, unbuilt |
+| ~~`exceljs`~~ | Spreadsheet export | **Now in use** — the time report's two-sheet workbook |
 | `@azure/storage-blob` | Attachments | Schema exists; the Azure wiring does not |
 | `lucide-react` | Icons | Never used — the two icons in the product are hand-written inline SVG. One glyph does not justify a package |
 | `clsx` | Class name joining | Template literals have covered every case so far |
@@ -147,6 +147,9 @@ Unauthorised reads return **404, never 403**. A 403 confirms the record exists, 
 | **Forgotten-timer watchdog** | `npm run watchdog`. Suspends rather than guessing — a suspended entry counts toward nothing until its owner says what they actually worked |
 | **Notifications** | A panel in the header. Assigned, sent back, mentioned, deadline moved, added as contributor. Nothing else |
 | **Team dashboard** | What's at risk, where the load is, what each client is absorbing |
+| **Browse** | Full-text search over titles and descriptions, plus filters that live in the URL — a filtered view is a link you can send |
+| **Clients** | The map of clients and engagements, scoped by the work you can actually see |
+| **Reports** | Where the hours went, over any range, with a two-sheet spreadsheet whose Detail rows sum to its Summary total |
 
 ## Configurable without code changes
 
