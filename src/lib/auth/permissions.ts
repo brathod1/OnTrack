@@ -421,15 +421,22 @@ export function overseeableUserIds(user: ActingUser): bigint[] | "ALL" {
 }
 
 /**
- * Gate for the "All tasks" screen.
+ * Gate for the Browse screen.
  *
- * ⚠ A SCREEN gate, not a scope grant. Whatever this screen renders is still
- * passed through `visibleTaskFilter` — a partner sees their own clients across
- * every engagement, an administrator sees everything. The two are different
- * capabilities precisely because conflating them once already leaked every
- * partner's portfolio to every other partner.
+ * ⚠ A SCREEN gate, not a scope grant. Whatever the screen renders is still
+ * passed through `visibleTaskFilter` — a manager sees their engagements and
+ * reports, a partner their own clients, an administrator everything. The two
+ * capabilities are separate precisely because conflating them once already
+ * leaked every partner's portfolio to every other partner.
+ *
+ * RENAMED from `canViewAllTasks`, which was a trap. It returns true for
+ * VIEW_PORTFOLIO as well, so a reader encountering `if (canViewAllTasks(user))`
+ * would reasonably conclude the user could see every task — false for a
+ * partner, and false for a manager. That is the same misreading that caused
+ * the original leak: assuming a capability named for a SCREEN granted the
+ * SCOPE the screen's title implied.
  */
-export function canViewAllTasks(user: ActingUser): boolean {
+export function canBrowsePortfolio(user: ActingUser): boolean {
   return can(user, CAP.VIEW_ALL_TASKS) || can(user, CAP.VIEW_PORTFOLIO);
 }
 

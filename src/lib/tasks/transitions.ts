@@ -269,7 +269,7 @@ export function transitionSideEffects(
  * TaskStatus is exhaustive and always yields a string. It also means adding a
  * status to the enum breaks the build here until a label is supplied.
  */
-const STATUS_LABELS: Record<TaskStatus, string> = {
+export const STATUS_LABELS: Record<TaskStatus, string> = {
   ASSIGNED: "Assigned",
   IN_PROGRESS: "In Progress",
   REVIEW: "In Review",

@@ -8,6 +8,8 @@ import {
 import { prisma } from "@/lib/db";
 import { recordActivity, type ActivityInput, type Tx } from "@/lib/activity/log";
 import { notify } from "@/lib/notifications/service";
+import { getCurrentOrganization } from "@/lib/org/current";
+import { localWorkDate } from "@/lib/time/service";
 import {
   assertPermitted,
   canCreateTask,
@@ -43,6 +45,11 @@ const taskWithContext = {
   engagement: {
     select: {
       id: true,
+      // The engagement's own name, alongside the client's. Added when the
+      // browse screen needed to render a row and could only say which CLIENT
+      // it belonged to — "ORCHID — ?" is not a useful line. One extra column
+      // on a join that was already happening.
+      name: true,
       partnerId: true,
       managerId: true,
       status: true,
@@ -51,6 +58,10 @@ const taskWithContext = {
       client: { select: { id: true, name: true, code: true } },
     },
   },
+  // Likewise: every list of tasks that spans more than one person has to say
+  // whose each one is. Carrying only assigneeId meant each caller resolved
+  // names itself, which is a join per caller instead of one here.
+  assignee: { select: { id: true, name: true } },
   contributors: { select: { userId: true } },
   _count: { select: { subtasks: { where: { status: { notIn: ["COMPLETED", "CANCELLED"] } } } } },
 } satisfies Prisma.TaskInclude;
@@ -679,6 +690,39 @@ export async function getTaskByKey(user: ActingUser, displayKey: string) {
   };
 }
 
+/**
+ * Task ids matching a free-text search, most relevant first.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * Raw SQL because the column is a `tsvector`, which Prisma models as
+ * `Unsupported` and cannot query. The GIN index on it has existed since Stage
+ * 1 and, until now, nothing had ever used it.
+ *
+ * `websearch_to_tsquery` rather than `plainto_tsquery`: it understands quoted
+ * phrases and `-exclusion`, which is what people type without being taught,
+ * and it never throws on malformed input — `plainto_tsquery` does, which would
+ * turn a stray quote into a 500.
+ *
+ * The organisation's `searchLanguage` drives stemming, so "filing" matches
+ * "filed". It is configuration rather than a literal because a firm operating
+ * in another language should not need a code change.
+ *
+ * CAPPED. Search narrows a list that is then filtered further and paginated;
+ * it is not itself the pagination. A cap keeps the `IN` clause sane.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+async function searchTaskIds(query: string, language: string): Promise<bigint[]> {
+  const rows = await prisma.$queryRaw<{ id: bigint }[]>`
+    SELECT id
+      FROM tasks
+     WHERE search_vector @@ websearch_to_tsquery(${language}::regconfig, ${query})
+       AND deleted_at IS NULL
+     ORDER BY ts_rank(search_vector, websearch_to_tsquery(${language}::regconfig, ${query})) DESC
+     LIMIT 500
+  `;
+  return rows.map((r) => r.id);
+}
+
 export async function listTasks(user: ActingUser, filters: ListTasksInput) {
   const where: Prisma.TaskWhereInput[] = [visibleTaskFilter(user)];
 
@@ -699,13 +743,29 @@ export async function listTasks(user: ActingUser, filters: ListTasksInput) {
     where.push({ currentEstimateMinutes: filters.hasEstimate ? { not: null } : null });
   }
 
+  const org = await getCurrentOrganization();
+
   if (filters.overdue) {
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
+    // The ORGANISATION's today, not the server's. Using UTC here made work
+    // stop counting as overdue for the five and a half hours each evening
+    // when it is already tomorrow in IST but still today in UTC — silently,
+    // and only in the evening, which is the hardest kind of wrong to notice.
+    const today = localWorkDate(new Date(), org.timezone);
     where.push({
       dueDate: { lt: today },
       status: { notIn: [TaskStatus.COMPLETED, TaskStatus.CANCELLED] },
     });
+  }
+
+  if (filters.search) {
+    // Previously declared in the schema and silently ignored here — a caller
+    // asking for "GSTR" received everything and had no way to know.
+    const ids = await searchTaskIds(filters.search, org.searchLanguage);
+
+    // No matches must mean NO RESULTS. An empty `in: []` is what Prisma needs
+    // to say that; omitting the clause entirely would hand back the unfiltered
+    // list, which is the original bug wearing a different hat.
+    where.push({ id: { in: ids } });
   }
 
   const rows = await prisma.task.findMany({

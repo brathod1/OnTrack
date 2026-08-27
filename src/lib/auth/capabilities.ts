@@ -167,6 +167,12 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
       CAP.TASK_CREATE, CAP.TASK_ASSIGN, CAP.TASK_SET_DEADLINE,
       CAP.TASK_SET_PRIORITY, CAP.TASK_CANCEL, CAP.TASK_REOPEN, CAP.TASK_REVIEW,
       CAP.TIME_LOG, CAP.TIME_EDIT_OTHERS,
+      // Added in Stage 14. A manager already sees every task they oversee on
+      // the Team dashboard; without this they could see that list and not
+      // search it. VIEW_PORTFOLIO is a SCREEN gate and grants no scope —
+      // visibleTaskFilter still decides what comes back — so this widens what
+      // a manager can DO with their work, not what work they can reach.
+      CAP.VIEW_PORTFOLIO,
       CAP.VIEW_REPORTS,
     ],
     isSystem: false,

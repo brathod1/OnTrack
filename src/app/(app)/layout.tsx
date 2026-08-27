@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireActingUser, getSessionUser } from "@/lib/auth/session";
-import { canOverseeOthers, canViewAllTasks } from "@/lib/auth/permissions";
+import { can, canOverseeOthers } from "@/lib/auth/permissions";
+import { CAP } from "@/lib/auth/capabilities";
 import { getTerminology } from "@/lib/org/terminology";
 import { signOut } from "@/lib/auth/auth";
 import { HeaderTimer } from "@/components/header-timer";
@@ -36,7 +37,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // reads from configuration rather than from a string literal here.
   const terms = await getTerminology();
 
-  const canSeeAll = canViewAllTasks(actor);
+  /**
+   * VIEW_PORTFOLIO, not VIEW_ALL_TASKS.
+   *
+   * This gate was wrong. VIEW_ALL_TASKS bypasses the relationship filter
+   * entirely and is held only by administrators — so gating the browse screen
+   * on it meant no partner could reach the very screen VIEW_PORTFOLIO was
+   * split out to permit, back when that split was made to stop every partner
+   * reading every other partner's client portfolio.
+   *
+   * The screen is a WAY IN, not a scope grant: results are still filtered by
+   * relationship for everyone who opens it.
+   */
+  const canBrowse = can(actor, CAP.VIEW_PORTFOLIO);
   // A capability question, not "is this person senior enough". An organisation
   // that gives its team leads task.assign gets the Team view for them without
   // anyone editing this file.
@@ -67,7 +80,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <NavLink href="/timesheet">Timesheet</NavLink>
             {showTeamView && <NavLink href="/team">Team</NavLink>}
             <NavLink href="/clients">{terms.plural("client")}</NavLink>
-            {canSeeAll && <NavLink href="/tasks/all">All {terms.plural("task").toLowerCase()}</NavLink>}
+            {/* "Browse", not "All tasks". Results are relationship-filtered
+                for everyone, so "All" would be a lie to every non-admin. */}
+            {canBrowse && <NavLink href="/browse">Browse</NavLink>}
           </nav>
 
           <div className="flex items-center gap-3">

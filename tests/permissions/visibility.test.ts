@@ -16,7 +16,7 @@ import {
   loadActingUser,
   visibleTaskFilter,
   assertCanReadTask,
-  canViewAllTasks,
+  canBrowsePortfolio,
   NotFoundError,
   type ActingUser,
 } from "@/lib/auth/permissions";
@@ -147,11 +147,38 @@ describe("admin visibility", () => {
     expect(await visibleKeys(actor.admin!)).toEqual([T.t1, T.t2, T.t3, T.t4, T.t5, T.t6]);
   });
 
-  it("is the only role permitted the All Tasks view besides partners", async () => {
-    expect(canViewAllTasks(actor.admin!)).toBe(true);
-    expect(canViewAllTasks(actor.priya!)).toBe(true);
-    expect(canViewAllTasks(actor.meera!)).toBe(false);
-    expect(canViewAllTasks(actor.eshan!)).toBe(false);
+  it("admins, partners and managers may open Browse; staff may not", async () => {
+    // Reaching the SCREEN. Managers were added in Stage 14: they already see
+    // every task they oversee on the Team dashboard, so withholding this left
+    // them with a list they could not search.
+    expect(canBrowsePortfolio(actor.admin!)).toBe(true);
+    expect(canBrowsePortfolio(actor.priya!)).toBe(true);
+    expect(canBrowsePortfolio(actor.meera!)).toBe(true);
+    // Staff do not browse. They work from My Work.
+    expect(canBrowsePortfolio(actor.eshan!)).toBe(false);
+  });
+
+  it("but the SCREEN gate grants no scope — only view.all_tasks does that", async () => {
+    // The distinction the rename exists to protect. Priya and Meera can both
+    // open Browse; neither can see past their own relationships, and the test
+    // above would have passed just as happily if this were broken.
+    const priyaSees = await prisma.task.findMany({
+      where: visibleTaskFilter(actor.priya!),
+      select: { displayKey: true },
+    });
+    const meeraSees = await prisma.task.findMany({
+      where: visibleTaskFilter(actor.meera!),
+      select: { displayKey: true },
+    });
+    const adminSees = await prisma.task.findMany({
+      where: visibleTaskFilter(actor.admin!),
+      select: { displayKey: true },
+    });
+
+    expect(priyaSees.length).toBeLessThan(adminSees.length);
+    expect(meeraSees.length).toBeLessThan(adminSees.length);
+    // Quentin's client is not Priya's to see, browse screen or not.
+    expect(priyaSees.map((t) => t.displayKey)).not.toContain("TSK-TEST-0004");
   });
 });
 
