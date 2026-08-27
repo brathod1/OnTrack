@@ -116,7 +116,9 @@ describe("the running timer", () => {
     });
 
     await expect(stopTimer(actor.eshan!)).rejects.toBeInstanceOf(InvalidOperationError);
-    await expect(stopTimer(actor.eshan!, "Year-end stock count at client")).resolves.toBeDefined();
+    await expect(
+      stopTimer(actor.eshan!, { note: "Year-end stock count at client" })
+    ).resolves.toBeDefined();
   });
 
   it("discarding frees the slot without recording time", async () => {
@@ -133,6 +135,28 @@ describe("the running timer", () => {
       where: { taskId: firm.tasks.t1, userId: firm.users.eshan },
     });
     expect(entry?.deletedAt).not.toBeNull();
+  });
+
+  it("REFUSES a stop aimed at a task the timer has since moved off", async () => {
+    // The stale-tab case, and it is not cosmetic. Task A open in one tab, a
+    // timer started on task B in another: tab A still shows a live Stop
+    // button, and without this guard pressing it stops B and records B's
+    // minutes while the page claims it stopped A.
+    await startTimer(actor.eshan!, firm.tasks.t1);
+    await startTimer(actor.eshan!, firm.tasks.t6);
+
+    await expect(
+      stopTimer(actor.eshan!, { expectedTaskId: firm.tasks.t1 })
+    ).rejects.toBeInstanceOf(InvalidOperationError);
+
+    // The real timer is untouched and still running.
+    const running = await getRunningTimer(firm.users.eshan);
+    expect(running?.taskId).toBe(firm.tasks.t6);
+
+    // Aimed correctly, it works.
+    await expect(
+      stopTimer(actor.eshan!, { expectedTaskId: firm.tasks.t6 })
+    ).resolves.toBeDefined();
   });
 
   it("refuses to log time to a task the user has no part in", async () => {
@@ -404,6 +428,48 @@ describe("the forgotten-timer watchdog", () => {
 
     expect(await getRunningTimer(firm.users.eshan)).toBeNull();
     await expect(startTimer(actor.eshan!, firm.tasks.t6)).resolves.toBeDefined();
+  });
+
+  it("REFUSES to auto-stop a suspended timer when another is started", async () => {
+    // The whole watchdog is defeated if this is allowed: the stop-and-start
+    // path computes elapsed time from startedAt, which for a suspended entry
+    // is precisely the fourteen-hour figure the watchdog refused to write.
+    const { started } = await startTimer(actor.eshan!, firm.tasks.t1);
+    await prisma.timeEntry.update({
+      where: { id: started.id },
+      data: { startedAt: new Date(Date.now() - 14 * 3_600_000) },
+    });
+    await runTimerWatchdog();
+
+    await expect(startTimer(actor.eshan!, firm.tasks.t6)).rejects.toBeInstanceOf(
+      InvalidOperationError
+    );
+
+    // Nothing was recorded against the suspended entry.
+    const entry = await prisma.timeEntry.findUniqueOrThrow({ where: { id: started.id } });
+    expect(entry.durationMinutes).toBe(0);
+    expect(entry.endedAt).toBeNull();
+    expect(entry.isSuspended).toBe(true);
+
+    const task = await prisma.task.findUniqueOrThrow({ where: { id: firm.tasks.t1 } });
+    expect(task.actualMinutes).toBe(0);
+  });
+
+  it("REFUSES a plain stop on a suspended timer", async () => {
+    // The UI does not offer this, but a service that trusts its UI has a hole.
+    const { started } = await startTimer(actor.eshan!, firm.tasks.t1);
+    await prisma.timeEntry.update({
+      where: { id: started.id },
+      data: { startedAt: new Date(Date.now() - 14 * 3_600_000) },
+    });
+    await runTimerWatchdog();
+
+    await expect(stopTimer(actor.eshan!, { note: "a note" })).rejects.toBeInstanceOf(
+      InvalidOperationError
+    );
+
+    const task = await prisma.task.findUniqueOrThrow({ where: { id: firm.tasks.t1 } });
+    expect(task.actualMinutes).toBe(0);
   });
 
   it("is idempotent — a second run does not re-suspend", async () => {

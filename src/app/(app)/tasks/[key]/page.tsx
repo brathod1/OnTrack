@@ -19,6 +19,9 @@ import {
 import { TaskActions } from "@/components/task-actions";
 import { TaskComments } from "@/components/task-comments";
 import { TaskContributors } from "@/components/task-contributors";
+import { TaskTimer } from "@/components/task-timer";
+import { getRunningTimer, localWorkDate } from "@/lib/time/service";
+import { getCurrentOrganization } from "@/lib/org/current";
 import {
   getMentionableUsers,
   isEditable,
@@ -60,7 +63,15 @@ export default async function TaskDetailPage({ params }: Params) {
     throw e;
   }
 
-  const { task, activity, timeByPerson, totalMinutes, canManage, transitions } = detail;
+  const { task, activity, timeByPerson, totalMinutes, canManage, canLogTime, transitions } =
+    detail;
+
+  // The user's running timer may be on ANY task, not this one — the control
+  // needs to know so it can offer a switch rather than silently stopping it.
+  const [running, org] = await Promise.all([
+    getRunningTimer(actor.id),
+    getCurrentOrganization(),
+  ]);
 
   const [comments, mentionable, activeUsers] = await Promise.all([
     listComments(actor, task.id),
@@ -320,6 +331,34 @@ export default async function TaskDetailPage({ params }: Params) {
             // Adding someone to work they do not own is a management act; the
             // assignee may also do it for their own task.
             canEdit={canManage || task.assignee.id === actor.id}
+          />
+
+          {/*
+            Rendered even when the task is closed: people routinely book the
+            last of their time after marking something complete, and the
+            service is the thing that decides whether that is allowed.
+          */}
+          <TaskTimer
+            taskKey={task.displayKey}
+            taskId={task.id.toString()}
+            running={
+              running?.startedAt
+                ? {
+                    entryId: running.id.toString(),
+                    taskKey: running.task.displayKey,
+                    taskTitle: running.task.title,
+                    startedAt: running.startedAt.toISOString(),
+                    isSuspended: running.isSuspended,
+                  }
+                : null
+            }
+            // Sent so the browser can correct its own clock drift rather than
+            // showing a readout that disagrees with what gets recorded.
+            serverNow={new Date().toISOString()}
+            todayIso={localWorkDate(new Date(), org.timezone).toISOString().slice(0, 10)}
+            canLogTime={canLogTime}
+            actualMinutes={task.actualMinutes}
+            estimateMinutes={task.currentEstimateMinutes}
           />
 
           <Panel title="Time">

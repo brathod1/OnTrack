@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { TaskStatus } from "@prisma/client";
+import { Dialog, DialogButtons } from "@/components/dialog";
 import {
   setBlockedAction,
   transitionAction,
@@ -407,62 +408,3 @@ function BlockDialog({
   );
 }
 
-function Dialog({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/30 p-4 pt-[12vh]"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-    >
-      <div className="w-full max-w-md rounded-lg bg-white p-4 shadow-xl">
-        <h2 className="mb-3 text-base font-semibold text-slate-900">{title}</h2>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function DialogButtons({
-  pending,
-  onClose,
-  confirmLabel,
-}: {
-  pending: boolean;
-  onClose: () => void;
-  confirmLabel: string;
-}) {
-  return (
-    <div className="flex justify-end gap-2 pt-1">
-      <button
-        type="button"
-        onClick={onClose}
-        className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
-      >
-        Cancel
-      </button>
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-      >
-        {pending ? "Working…" : confirmLabel}
-      </button>
-    </div>
-  );
-}

@@ -1,6 +1,12 @@
 import { Prisma, TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { NotFoundError, visibleTaskFilter, canManageTask, type ActingUser } from "@/lib/auth/permissions";
+import {
+  NotFoundError,
+  visibleTaskFilter,
+  canLogTime,
+  canManageTask,
+  type ActingUser,
+} from "@/lib/auth/permissions";
 import { availableTransitions, type TransitionFacts } from "./transitions";
 
 /**
@@ -109,6 +115,12 @@ export interface TaskDetailResult {
   timeByPerson: { userId: bigint; name: string; minutes: number }[];
   totalMinutes: number;
   canManage: boolean;
+  /**
+   * Whether this user may log time HERE. Seeing a task and working on it are
+   * different things — a partner can see everything on their clients but has
+   * no business booking hours to work they are not doing.
+   */
+  canLogTime: boolean;
   transitions: ReturnType<typeof availableTransitions>;
 }
 
@@ -198,6 +210,7 @@ export async function getTaskDetail(
     timeByPerson,
     totalMinutes: timeByPerson.reduce((sum, r) => sum + r.minutes, 0),
     canManage: canManageTask(user, ctx),
+    canLogTime: canLogTime(user, ctx),
     // Computed server-side so the UI renders buttons from this rather than
     // deciding for itself. Stage 9 wires them up.
     transitions: availableTransitions(user, ctx, facts),

@@ -190,6 +190,22 @@ export async function startTimer(
         throw new InvalidOperationError("A timer is already running on this task.");
       }
 
+      // A SUSPENDED entry must never be auto-stopped.
+      //
+      // The stop-and-start below computes elapsed time from startedAt. For a
+      // suspended timer that is the fourteen-hour figure the watchdog
+      // deliberately refused to write — so without this guard, pressing
+      // "Start timer" on any other task silently records it, defeating the
+      // watchdog entirely through the most ordinary action in the product.
+      //
+      // Blocking the start is the lesser cost: it is one extra step, and the
+      // person is the only one who knows the real number.
+      if (running.isSuspended) {
+        throw new InvalidOperationError(
+          `Your timer on ${running.task.displayKey} was left running and is waiting to be confirmed. Say how long you worked on it before starting another.`
+        );
+      }
+
       const minutes = Math.max(
         0,
         Math.round((now.getTime() - running.startedAt.getTime()) / 60_000)
@@ -238,10 +254,47 @@ export async function startTimer(
   });
 }
 
-export async function stopTimer(user: ActingUser, note?: string) {
+export interface StopTimerInput {
+  note?: string;
+  /**
+   * The task the CALLER believes the timer is on.
+   *
+   * ─────────────────────────────────────────────────────────────────────────
+   * Stopping is not addressed to a task — it stops whatever the user has
+   * running. That is correct, but it makes a stale page dangerous: leave task A
+   * open in one tab, start a timer on task B in another, and tab A still shows
+   * a live "Stop timer" button. Pressing it would stop B and record B's
+   * minutes, while the page said it was stopping A.
+   *
+   * So the page states its belief and the server refuses when that belief is
+   * out of date, exactly as `expectedVersion` does for task edits. Optional,
+   * because a caller with no page behind it (a job, a script) has no belief to
+   * state — but every UI path passes it.
+   * ─────────────────────────────────────────────────────────────────────────
+   */
+  expectedTaskId?: bigint;
+}
+
+export async function stopTimer(user: ActingUser, input: StopTimerInput = {}) {
+  const { note, expectedTaskId } = input;
   const running = await getRunningTimer(user.id);
   if (!running?.startedAt) {
     throw new InvalidOperationError("You have no timer running.");
+  }
+
+  if (expectedTaskId !== undefined && running.taskId !== expectedTaskId) {
+    throw new InvalidOperationError(
+      `Your timer has moved to ${running.task.displayKey} since this page was loaded. Reload it before stopping.`
+    );
+  }
+
+  // Same reasoning as startTimer: stopping a suspended entry would compute the
+  // elapsed figure the watchdog refused to write. The UI does not offer this,
+  // but a service that trusts its UI is a service with a hole in it.
+  if (running.isSuspended) {
+    throw new InvalidOperationError(
+      "That timer was left running and is waiting to be confirmed. Say how long you actually worked instead of stopping it."
+    );
   }
 
   const now = new Date();
@@ -285,9 +338,20 @@ export async function stopTimer(user: ActingUser, note?: string) {
  * rather than removed, so the mistake is visible and the slot is freed —
  * the unique index ignores deleted rows.
  */
-export async function discardTimer(user: ActingUser, reason = "started by mistake") {
+export async function discardTimer(
+  user: ActingUser,
+  reason = "started by mistake",
+  /** Same stale-page guard as stopTimer — discarding the wrong task is worse. */
+  expectedTaskId?: bigint
+) {
   const running = await getRunningTimer(user.id);
   if (!running) throw new InvalidOperationError("You have no timer running.");
+
+  if (expectedTaskId !== undefined && running.taskId !== expectedTaskId) {
+    throw new InvalidOperationError(
+      `Your timer has moved to ${running.task.displayKey} since this page was loaded. Reload it before discarding.`
+    );
+  }
 
   return prisma.$transaction(async (tx) => {
     await tx.timeEntry.update({
