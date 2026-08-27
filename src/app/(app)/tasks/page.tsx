@@ -175,12 +175,16 @@ function TaskRow({
     <li className="border-b border-slate-100 last:border-b-0">
       <Link
         href={`/tasks/${task.displayKey}`}
-        className={`flex flex-col gap-1.5 py-2.5 pr-3 hover:bg-slate-50 sm:flex-row sm:items-center sm:gap-3 ${
-          // Subtasks are indented and given a left rule so the hierarchy is
-          // visible even when the parent is in a different band — which
-          // happens often, since a subtask can be due weeks before its parent.
-          isSubtask ? "border-l-2 border-slate-200 pl-5" : "pl-3"
-        }`}
+        // FLAT. Subtasks were indented behind a left rule, and it read as a
+        // lie: a rule down the side of consecutive rows is the standard visual
+        // for "these belong to the row above", but this list is sorted by DATE,
+        // so the row above is usually unrelated — and the actual parent is
+        // frequently not in the list at all, being someone else's work.
+        //
+        // The "part of X" label below states the relationship exactly and
+        // survives any sort order. Nothing is lost by dropping the rule except
+        // an implication that was false.
+        className="flex flex-col gap-1.5 py-2.5 pl-3 pr-3 hover:bg-slate-50 sm:flex-row sm:items-center sm:gap-3"
       >
         <PriorityMark priority={task.priority} />
 
@@ -199,12 +203,12 @@ function TaskRow({
               {task.engagement.client.code} — {task.engagement.name}
             </span>
 
-            {/* What this subtask is part of. Without it, a subtask sitting
-                three rows above its own parent reads as an unrelated task. */}
+            {/* What this subtask is part of — now the ONLY signal of
+                hierarchy, so it is no longer the faintest thing on the row. */}
             {isSubtask && task.parentTask && (
               <>
                 <span aria-hidden="true">·</span>
-                <span className="truncate text-slate-400">
+                <span className="truncate text-slate-500">
                   part of {task.parentTask.title}
                 </span>
               </>

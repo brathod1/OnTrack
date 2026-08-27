@@ -1,15 +1,15 @@
 # OnTrack — Project Status
 
-**As at:** 27 August 2026 · **Commit:** `508584f` · **Branch:** `main`
-**20 commits · 250 tests passing · 7 migrations · 22 tables**
+**As at:** 27 August 2026 · **Commit:** `c7a7d2e` · **Branch:** `main`
+**23 commits · 288 tests passing · 8 migrations · 22 tables**
 
 ---
 
 ## 1. What exists and works today
 
-You can run `npm run dev`, sign in as any of nine seeded people, open a task, move it through its lifecycle, discuss it, run a timer against it, and see the week in a timesheet. The task engine is complete and usable end to end.
+You can run `npm run dev`, sign in as any of nine seeded people, open a task, move it through its lifecycle, discuss it, run a timer against it, see the week in a timesheet, and be told when something needs you.
 
-What it does not yet do is tell anyone anything — no notifications, no dashboards, no reports. It records work faithfully; it does not yet surface it.
+What it does not yet do is show anyone the shape of the work — no dashboards, no filtering, no reports. And notifications reach people **in the app only**; email is deliberately unbuilt, waiting on Microsoft Graph approval.
 
 ### Database
 
@@ -55,6 +55,7 @@ Unauthorised reads return **404, never 403**. A 403 would confirm the record exi
 - **Comments** — 15-minute author edit window, then fixed. Nobody may edit another person's words, manager included. Removal leaves a tombstone, and the original text goes to the activity log
 - **Time tracking** — server-owned timer surviving reloads and devices, manual entry as a first-class path, a duration field that echoes what it understood, and a weekly grid whose empty days are the point
 - **Forgotten-timer watchdog** — `npm run watchdog` (and `--dry-run`). Suspends rather than guessing; a suspended entry counts toward nothing until its owner says what they worked
+- **Notifications** — a panel in the header. You are told when work is assigned to you, when it is sent back, when someone mentions you, when a deadline of yours moves, and when you are added as a contributor. Nothing else
 
 ### Configuration
 
@@ -77,13 +78,15 @@ Being explicit, because the foundation makes the product look further along than
 
 | Stage | What's missing |
 |---|---|
-| **12** | **Notifications** — nothing reaches anyone. A task assigned to you, a comment mentioning you, and work sent back all happen silently unless you are looking at the screen |
+| **12** | **Email notifications** — the in-app half is built; email is not. See below |
 | **13** | Dashboards — employee and senior |
 | **14** | Filtering and search UI |
 | **15** | Reports and export — including timesheet approval, which is designed but unbuilt |
 | **16** | Security testing, load testing, deployment |
 
-Stages 8 to 11 are complete. Stage 12 is the sharpest gap: the system now records work faithfully and tells nobody about it.
+Stages 8 to 12 are complete, bar email.
+
+**On email:** it is not merely unbuilt, it is *blocked by a decision you made deliberately*. Microsoft Graph was excluded from the Entra app registration IT is approving, so sending mail needs a second approval round. The engine is channel-agnostic and `notifications.email_sent_at` is the seam — adding email later means a sender and a job, not a redesign. Until then, people are told only while they are in the app, which is the honest limitation to state to whoever approves this.
 
 Also outstanding:
 
@@ -120,6 +123,9 @@ What IT needs to create: a single-tenant app registration, redirect URI `/api/au
 | **Confirming a suspended timer is not an "edit"** | "Edited a time entry from 0m to 2h 30m" invites exactly the suspicion an append-only log exists to remove |
 | **A timer stopped inside a minute is discarded** | Recording 0m is honest and useless; rounding up invents time |
 | **Reading someone's timesheet needs the same standing as correcting it** | Otherwise the two drift into "can fix what they cannot see" |
+| **Notifications are written in the causing transaction, not queued** | A crash between committing an assignment and enqueuing its notification leaves work on a plate with nobody told. Email is the opposite case and is where a queue will earn its place |
+| **Told on standing, not visibility** | Plenty of people can see a task; almost none need telling when it changes. Notifying everyone who can see it is how a bell becomes wallpaper |
+| **Nobody is notified of their own action** | Enforced centrally, not at each call site — six places to forget is six places it will be forgotten |
 
 ---
 
@@ -155,6 +161,8 @@ npm run db:test      # bring the test database up to date after a migration
 npm run watchdog:dry # report timers past the ceiling, writing nothing
 npm run watchdog     # suspend them
 ```
+
+To see notifications: sign in as one person, assign them work or mention them from another, then sign back in as the first.
 
 The watchdog needs a scheduler in production — hourly is ample. Which one (Task Scheduler, cron, an Azure WebJob) is a Stage 16 decision; it is a process that exits, so any of them work.
 
