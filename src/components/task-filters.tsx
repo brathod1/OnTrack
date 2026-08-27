@@ -163,7 +163,12 @@ export function TaskFilters({
 
 function countActive(params: URLSearchParams): number {
   let n = 0;
-  for (const key of ["q", "client", "assignee", "status", "priority", "overdue", "blocked"]) {
+  // "engagement" has no dropdown of its own — it arrives from the clients
+  // directory. Counting it here is what makes Clear appear, so a filter with
+  // no visible control is never one you cannot get rid of.
+  for (const key of [
+    "q", "client", "engagement", "assignee", "status", "priority", "overdue", "blocked",
+  ]) {
     if (params.get(key)) n += 1;
   }
   return n;

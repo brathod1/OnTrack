@@ -48,6 +48,9 @@ export default async function BrowsePage({
   const parsed = listTasksSchema.safeParse({
     search: sp.q || undefined,
     clientId: sp.client || undefined,
+    // Arrived here from the clients directory, which links to one engagement
+    // rather than a whole client.
+    engagementId: sp.engagement || undefined,
     assigneeId: sp.assignee || undefined,
     status: sp.status ? [sp.status] : undefined,
     priority: sp.priority ? [sp.priority] : undefined,
@@ -65,7 +68,7 @@ export default async function BrowsePage({
     ? parsed.data
     : listTasksSchema.parse({ limit: PAGE_SIZE });
 
-  const [result, clients, people] = await Promise.all([
+  const [result, clients, people, engagement] = await Promise.all([
     listTasks(actor, filters),
 
     // Only clients the user can actually reach work on — otherwise the filter
@@ -82,11 +85,24 @@ export default async function BrowsePage({
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
+
+    // Named only when the filter is in play, so it costs a query on the way in
+    // from the clients directory and nothing otherwise. Without it the list is
+    // filtered by something the page never mentions.
+    filters.engagementId
+      ? prisma.engagement.findFirst({
+          where: {
+            AND: [{ id: filters.engagementId }, { tasks: { some: visibleTaskFilter(actor) } }],
+          },
+          select: { name: true, client: { select: { name: true } } },
+        })
+      : Promise.resolve(null),
   ]);
 
   const activeFilters = [
     sp.q,
     sp.client,
+    sp.engagement,
     sp.assignee,
     sp.status,
     sp.priority,
@@ -126,6 +142,15 @@ export default async function BrowsePage({
           label: p.charAt(0) + p.slice(1).toLowerCase(),
         }))}
       />
+
+      {engagement && (
+        <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          Showing {engagement.client.name} — {engagement.name}.{" "}
+          <Link href="/browse" className="underline">
+            Show everything
+          </Link>
+        </p>
+      )}
 
       {!parsed.success && activeFilters > 0 && (
         <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
