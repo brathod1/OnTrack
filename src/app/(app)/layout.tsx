@@ -83,6 +83,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             {/* "Browse", not "All tasks". Results are relationship-filtered
                 for everyone, so "All" would be a lie to every non-admin. */}
             {canBrowse && <NavLink href="/browse">Browse</NavLink>}
+            {/* Same capability as the page itself. A nav link the page then
+                404s is worse than no link — it looks like a broken product
+                rather than a deliberate boundary. */}
+            {can(actor, CAP.VIEW_REPORTS) && <NavLink href="/reports">Reports</NavLink>}
           </nav>
 
           <div className="flex items-center gap-3">
