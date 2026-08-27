@@ -3,6 +3,8 @@ import { requireActingUser, getSessionUser } from "@/lib/auth/session";
 import { canOverseeOthers, canViewAllTasks } from "@/lib/auth/permissions";
 import { getTerminology } from "@/lib/org/terminology";
 import { signOut } from "@/lib/auth/auth";
+import { HeaderTimer } from "@/components/header-timer";
+import { getRunningTimer } from "@/lib/time/service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,9 +18,14 @@ export const dynamic = "force-dynamic";
  * request, a deactivated user stops working immediately rather than when their
  * session happens to expire.
  *
- * Navigation is deliberately short. Four items, not a sidebar of twenty: a
- * professional tool people use all day rewards knowing where everything is
- * over discovering it.
+ * Navigation is deliberately short — a handful of items, not a sidebar of
+ * twenty: a professional tool people use all day rewards knowing where
+ * everything is over discovering it. Timesheet earned its place because it is
+ * a weekly destination in its own right; anything used less often than that
+ * belongs on a page, not in the shell.
+ *
+ * The running timer lives here too, for the same reason the nav is short: it
+ * must be impossible to miss. A timer out of sight is a timer left running.
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const actor = await requireActingUser();
@@ -32,6 +39,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // that gives its team leads task.assign gets the Team view for them without
   // anyone editing this file.
   const showTeamView = canOverseeOthers(actor);
+
+  // A timer you have to go and find is a timer left running, so the clock sits
+  // in the shell rather than on one page. One indexed lookup per request.
+  const running = await getRunningTimer(actor.id);
 
   async function doSignOut() {
     "use server";
@@ -48,12 +59,27 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
           <nav className="flex flex-1 items-center gap-1 overflow-x-auto" aria-label="Main">
             <NavLink href="/tasks">My work</NavLink>
+            <NavLink href="/timesheet">Timesheet</NavLink>
             {showTeamView && <NavLink href="/team">Team</NavLink>}
             <NavLink href="/clients">{terms.plural("client")}</NavLink>
             {canSeeAll && <NavLink href="/tasks/all">All {terms.plural("task").toLowerCase()}</NavLink>}
           </nav>
 
           <div className="flex items-center gap-3">
+            <HeaderTimer
+              running={
+                running?.startedAt
+                  ? {
+                      taskId: running.taskId.toString(),
+                      taskKey: running.task.displayKey,
+                      taskTitle: running.task.title,
+                      startedAt: running.startedAt.toISOString(),
+                      isSuspended: running.isSuspended,
+                    }
+                  : null
+              }
+              serverNow={new Date().toISOString()}
+            />
             <span className="hidden text-sm text-slate-600 sm:inline">{session?.name}</span>
             <form action={doSignOut}>
               <button
