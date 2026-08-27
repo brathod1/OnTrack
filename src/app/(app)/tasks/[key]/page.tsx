@@ -17,6 +17,13 @@ import {
   StatusBadge,
 } from "@/components/task-ui";
 import { TaskActions } from "@/components/task-actions";
+import { TaskComments } from "@/components/task-comments";
+import { TaskContributors } from "@/components/task-contributors";
+import {
+  getMentionableUsers,
+  isEditable,
+  listComments,
+} from "@/lib/tasks/comments";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,6 +61,37 @@ export default async function TaskDetailPage({ params }: Params) {
   }
 
   const { task, activity, timeByPerson, totalMinutes, canManage, transitions } = detail;
+
+  const [comments, mentionable, activeUsers] = await Promise.all([
+    listComments(actor, task.id),
+    // Narrow on purpose: mentioning someone who cannot open the task invites
+    // them to a room they have no key for.
+    getMentionableUsers(actor, task.id),
+    // Broad on purpose: adding a contributor is how someone GAINS access, the
+    // same way assigning work adds engagement membership. Restricting this to
+    // people already on the engagement would make it impossible to pull in a
+    // colleague from another team — which is exactly when you want to.
+    prisma.user.findMany({
+      where: { status: "ACTIVE" },
+      select: { id: true, name: true, team: { select: { name: true } } },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+
+  // The edit window and delete rights are decided server-side and passed down
+  // as booleans. A client deciding "was this within fifteen minutes?" against
+  // its own clock would disagree with the server the moment they drift.
+  const commentViews = comments.map((c) => ({
+    id: c.id.toString(),
+    bodyMd: c.bodyMd,
+    authorId: c.author.id.toString(),
+    authorName: c.author.name,
+    createdAt: c.createdAt.toISOString(),
+    editedAt: c.editedAt?.toISOString() ?? null,
+    deletedAt: c.deletedAt?.toISOString() ?? null,
+    canEdit: isEditable(c, c.author.id, actor.id),
+    canDelete: !c.deletedAt && (c.author.id === actor.id || canManage),
+  }));
 
   // Activity values carry user ids as strings. Resolve them in one query
   // rather than per row.
@@ -231,6 +269,16 @@ export default async function TaskDetailPage({ params }: Params) {
             </section>
           )}
 
+          <TaskComments
+            taskKey={task.displayKey}
+            comments={commentViews}
+            mentionable={mentionable.map((m) => ({
+              id: m.id.toString(),
+              name: m.name,
+            }))}
+            currentUserId={actor.id.toString()}
+          />
+
           <section>
             <h2 className="mb-2 text-sm font-semibold text-slate-700">History</h2>
             <Timeline entries={activity} nameOf={nameOf} />
@@ -248,13 +296,31 @@ export default async function TaskDetailPage({ params }: Params) {
             )}
             {task.assignedBy && <Row label="Assigned by" value={task.assignedBy.name} />}
             <Row label="Created by" value={task.createdBy.name} />
-            {task.contributors.length > 0 && (
-              <Row
-                label="Contributors"
-                value={task.contributors.map((c) => c.user.name).join(", ")}
-              />
-            )}
           </Panel>
+
+          <TaskContributors
+            taskKey={task.displayKey}
+            contributors={task.contributors.map((c) => ({
+              id: c.userId.toString(),
+              name: c.user.name,
+              addedBy: c.addedBy.name,
+            }))}
+            candidates={activeUsers
+              .filter(
+                (u) =>
+                  u.id !== task.assignee.id &&
+                  !task.contributors.some((c) => c.userId === u.id)
+              )
+              .map((u) => ({
+                id: u.id.toString(),
+                // Team shown because "Anjali Nair" is ambiguous in a firm of
+                // sixty and "Anjali Nair (Direct Tax)" is not.
+                name: u.team?.name ? `${u.name} (${u.team.name})` : u.name,
+              }))}
+            // Adding someone to work they do not own is a management act; the
+            // assignee may also do it for their own task.
+            canEdit={canManage || task.assignee.id === actor.id}
+          />
 
           <Panel title="Time">
             <Row

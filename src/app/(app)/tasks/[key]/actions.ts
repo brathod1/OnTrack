@@ -4,7 +4,14 @@ import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
 import { requireActingUser } from "@/lib/auth/session";
 import { blockSchema, transitionSchema } from "@/lib/tasks/schemas";
-import { resolveTaskIdByKey, setBlocked, transitionTask } from "@/lib/tasks/service";
+import {
+  addContributor,
+  removeContributor,
+  resolveTaskIdByKey,
+  setBlocked,
+  transitionTask,
+} from "@/lib/tasks/service";
+import { addComment, deleteComment, editComment } from "@/lib/tasks/comments";
 import {
   ConflictError,
   ForbiddenError,
@@ -97,6 +104,115 @@ export async function transitionAction(
   } catch (e) {
     // Whether an override is even offered is the kernel's call, not the form's.
     return translate(e, formData.get("canManage") === "true");
+  }
+}
+
+// ── Comments ────────────────────────────────────────────────────────────────
+
+export async function addCommentAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  const user = await requireActingUser();
+  const key = String(formData.get("key") ?? "");
+
+  try {
+    const taskId = await resolveTaskIdByKey(user, key);
+    const body = String(formData.get("body") ?? "");
+
+    // Mentions arrive as ids the picker collected, never parsed from the text.
+    // Parsing "@Kavya" breaks the moment two people share a first name, and
+    // resolves silently to the wrong person rather than failing.
+    const mentions = String(formData.get("mentions") ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => /^\d+$/.test(s))
+      .map((s) => BigInt(s));
+
+    await addComment(user, taskId, { bodyMd: body, mentions });
+
+    revalidatePath(`/tasks/${key}`);
+    return { ok: true };
+  } catch (e) {
+    return translate(e, false);
+  }
+}
+
+export async function editCommentAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  const user = await requireActingUser();
+  const key = String(formData.get("key") ?? "");
+
+  try {
+    const commentId = BigInt(String(formData.get("commentId") ?? "0"));
+    await editComment(user, commentId, String(formData.get("body") ?? ""));
+
+    revalidatePath(`/tasks/${key}`);
+    return { ok: true };
+  } catch (e) {
+    return translate(e, false);
+  }
+}
+
+export async function deleteCommentAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  const user = await requireActingUser();
+  const key = String(formData.get("key") ?? "");
+
+  try {
+    const commentId = BigInt(String(formData.get("commentId") ?? "0"));
+    await deleteComment(user, commentId);
+
+    revalidatePath(`/tasks/${key}`);
+    return { ok: true };
+  } catch (e) {
+    return translate(e, false);
+  }
+}
+
+// ── Contributors ────────────────────────────────────────────────────────────
+
+export async function addContributorAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  const user = await requireActingUser();
+  const key = String(formData.get("key") ?? "");
+
+  try {
+    const taskId = await resolveTaskIdByKey(user, key);
+    const userId = BigInt(String(formData.get("userId") ?? "0"));
+    await addContributor(user, taskId, userId);
+
+    revalidatePath(`/tasks/${key}`);
+    revalidatePath("/tasks");
+    return { ok: true };
+  } catch (e) {
+    return translate(e, false);
+  }
+}
+
+export async function removeContributorAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  const user = await requireActingUser();
+  const key = String(formData.get("key") ?? "");
+
+  try {
+    const taskId = await resolveTaskIdByKey(user, key);
+    const userId = BigInt(String(formData.get("userId") ?? "0"));
+    await removeContributor(user, taskId, userId);
+
+    revalidatePath(`/tasks/${key}`);
+    revalidatePath("/tasks");
+    return { ok: true };
+  } catch (e) {
+    return translate(e, false);
   }
 }
 
