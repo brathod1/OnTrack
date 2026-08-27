@@ -1,4 +1,5 @@
-import { ActivityAction } from "@prisma/client";
+import { ActivityAction, NotificationType } from "@prisma/client";
+import { notifyMany } from "@/lib/notifications/service";
 import { prisma } from "@/lib/db";
 import { recordActivity } from "@/lib/activity/log";
 import { visibleTaskFilter, canManageTask, type ActingUser } from "@/lib/auth/permissions";
@@ -136,8 +137,22 @@ export async function addComment(
       action: ActivityAction.COMMENT_ADDED,
     });
 
-    // Notifications are Stage 12. The mentions are stored now so that stage
-    // has something to work from rather than needing a backfill.
+    // Only the people MENTIONED, never everyone who can see the task. A
+    // mention is one person addressing another; a comment is not an
+    // announcement, and treating it as one is how a team learns to ignore the
+    // bell. The list was already filtered above to people who can open the
+    // task, so this cannot invite anyone into a room they have no key to.
+    await notifyMany(tx, mentions, {
+      actorId: user.id,
+      type: NotificationType.MENTIONED,
+      taskId,
+      payload: {
+        // An excerpt, so the list is readable without opening every task.
+        // Truncated rather than stored whole: this is a pointer to the
+        // conversation, not a copy of it.
+        excerpt: body.length > 140 ? `${body.slice(0, 140)}…` : body,
+      },
+    });
 
     return comment;
   });

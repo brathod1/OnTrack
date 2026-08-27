@@ -522,6 +522,7 @@ model Task {
   attachments  Attachment[]
   timeEntries  TimeEntry[]
   activity     ActivityLog[]
+  notifications Notification[]
 
   @@index([assigneeId, status, dueDate])
   @@index([engagementId, status])
@@ -717,7 +718,12 @@ model Notification {
   user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   type   NotificationType
 
+  /// Nullable because not every notification need concern a task — but when
+  /// one does, it is a real task. This carried no foreign key until Stage 12,
+  /// which meant a notification could point at an id that had never existed
+  /// and nothing would object.
   taskId  BigInt? @map("task_id")
+  task    Task?   @relation(fields: [taskId], references: [id], onDelete: Cascade)
   payload Json    @default("{}")
 
   /// Events on one task within 15 minutes collapse onto the same key.

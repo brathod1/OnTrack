@@ -1,6 +1,13 @@
-import { ActivityAction, EngagementCapacity, Prisma, TaskStatus } from "@prisma/client";
+import {
+  ActivityAction,
+  EngagementCapacity,
+  NotificationType,
+  Prisma,
+  TaskStatus,
+} from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { recordActivity, type ActivityInput, type Tx } from "@/lib/activity/log";
+import { notify } from "@/lib/notifications/service";
 import {
   assertPermitted,
   canCreateTask,
@@ -193,6 +200,16 @@ export async function createTask(user: ActingUser, input: CreateTaskInput) {
       field: "assigneeId", newValue: input.assigneeId,
     });
 
+    // Same transaction as the assignment itself. Enqueued instead, a crash
+    // between the two leaves work on someone's plate with nobody told.
+    await notify(tx, {
+      userId: input.assigneeId,
+      actorId: user.id,
+      type: NotificationType.ASSIGNED_TO_ME,
+      taskId: task.id,
+      payload: { dueDate: task.dueDate.toISOString() },
+    });
+
     return task;
   });
 }
@@ -315,6 +332,8 @@ export async function updateTask(user: ActingUser, taskId: bigint, input: Update
 
   if (Object.keys(data).length === 0) return task;
 
+  const dueDateMoved = data.dueDate !== undefined;
+
   return prisma.$transaction(async (tx) => {
     const updated = await tx.task.update({
       where: { id: task.id },
@@ -322,6 +341,24 @@ export async function updateTask(user: ActingUser, taskId: bigint, input: Update
       include: taskWithContext,
     });
     for (const a of activities) await recordActivity(tx, a);
+
+    // A moved deadline is the one field change worth interrupting someone for:
+    // it changes what they should be doing today. Title, priority and estimate
+    // edits are visible when they next open the task and notify nobody.
+    if (dueDateMoved) {
+      await notify(tx, {
+        userId: task.assigneeId,
+        actorId: user.id,
+        type: NotificationType.DUE_DATE_CHANGED,
+        taskId: task.id,
+        payload: {
+          from: task.dueDate.toISOString(),
+          to: (data.dueDate as Date).toISOString(),
+          reason: input.reason ?? null,
+        },
+      });
+    }
+
     return updated;
   });
 }
@@ -391,6 +428,17 @@ export async function assignTask(
       reason: input.reason ?? null,
     });
 
+    // Only the person receiving the work. The person losing it already knows —
+    // either they handed it over, or their manager told them, and a bell
+    // saying "this is no longer yours" is a notification nobody acts on.
+    await notify(tx, {
+      userId: input.assigneeId,
+      actorId: user.id,
+      type: NotificationType.ASSIGNED_TO_ME,
+      taskId: task.id,
+      payload: { reason: input.reason ?? null },
+    });
+
     return updated;
   });
 }
@@ -457,6 +505,31 @@ export async function transitionTask(
       field: "status", oldValue: task.status, newValue: input.to,
       reason: input.reason ?? null,
     });
+
+    // Only two transitions put a ball in someone else's court, and only those
+    // two notify. Completion, cancellation and starting work are all visible
+    // on the screens people already look at; a bell for every status change
+    // is how the bell stops being read.
+    if (action === ActivityAction.SUBMITTED_FOR_REVIEW && task.reviewerId) {
+      await notify(tx, {
+        userId: task.reviewerId,
+        actorId: user.id,
+        type: NotificationType.REVIEW_REQUESTED,
+        taskId: task.id,
+      });
+    }
+
+    if (action === ActivityAction.REVIEW_REJECTED) {
+      // Sent back with a reason the assignee has to act on. This one matters
+      // most: work sitting rejected and unseen is the failure people notice.
+      await notify(tx, {
+        userId: task.assigneeId,
+        actorId: user.id,
+        type: NotificationType.REVIEW_REJECTED,
+        taskId: task.id,
+        payload: { reason: input.reason ?? null },
+      });
+    }
 
     return { task: updated, warnings: result.warnings };
   });
@@ -540,6 +613,14 @@ export async function addContributor(user: ActingUser, taskId: bigint, userId: b
       taskId: task.id, actorId: user.id, action: ActivityAction.CONTRIBUTOR_ADDED,
       field: "contributors", newValue: userId,
     });
+
+    await notify(tx, {
+      userId,
+      actorId: user.id,
+      type: NotificationType.ADDED_AS_CONTRIBUTOR,
+      taskId: task.id,
+    });
+
     return loadVisibleTask(user, task.id);
   });
 }
