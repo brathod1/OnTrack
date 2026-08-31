@@ -38,7 +38,7 @@ Each of these was in the full specification and is **removed from this phase**:
 | **Reporting-line history table** | Team reports use the current reporting line. Known limitation: historical team reports shift if someone changes manager. Accepted for this phase. |
 | **Separate firm-wide audit log** | One `activity_log` table covers task events plus attachment downloads and exports. Two tables were justified by 7-year compliance retention, which this phase doesn't claim. |
 | **Watchers** | Notifications go to the people with a defined relationship to the task (assignee, assigner, reviewer, mentioned). No opt-in follow list. |
-| **Observer engagement capacity, scope enum** | Visibility is the six explicit predicates in §4, coded directly. No abstract scope machinery. |
+| **Observer engagement capacity, scope enum** | Visibility is the six explicit predicates in §4, coded directly. No abstract scope machinery. **CORRECTION — 31 Aug 2026: an `OBSERVER` capacity was later added**, for the opposite reason to the one cut here. It is not scope machinery and adds no predicate: it *narrows* the existing engagement-membership predicate, so that being handed one task no longer grants read access to the whole engagement. See `docs/Project Status.md` §4. |
 | **Kanban, calendar view, dependencies, PDF export, bulk edit, custom fields, Teams integration, SSE** | Explicitly out per the scope lock. |
 | **Estimate-accuracy scoring per person** | Not built, by design. §6. |
 

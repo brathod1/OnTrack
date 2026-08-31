@@ -1,7 +1,7 @@
 # OnTrack — Project Status
 
-**As at:** 27 August 2026 · **Commit:** `b3c3c95` · **Branch:** `main`
-**28 commits · 358 tests passing · 9 migrations · 22 tables**
+**As at:** 31 August 2026 · **Commit:** `a472a6d` · **Branch:** `main`
+**34 commits · 393 tests passing · 10 migrations · 21 tables**
 
 ---
 
@@ -16,7 +16,7 @@ You can run `npm run dev`, sign in as any of nine seeded people, open a task, mo
 | | |
 |---|---|
 | PostgreSQL 18 | `ontrack` (development) and `ontrack_test` (isolated test database) |
-| 22 tables | Organisation, roles, users, teams, clients, engagements, tasks, time entries, comments, attachments, activity log, notifications, recurrence, saved views |
+| 21 tables | Organisation, roles, users, teams, clients, engagements, tasks, time entries, comments, attachments, activity log, notifications, recurrence, saved views |
 | Two database roles | `ontrack_owner` owns the schema; `ontrack_app` runs the application with deliberately restricted grants |
 
 **Invariants enforced by PostgreSQL rather than by convention:**
@@ -42,13 +42,16 @@ Capability + relationship, in every decision:
 
 Visibility is a **union of relationships** — assignee, contributor, reviewer, creator, engagement member, line manager, engagement partner — not an org-chart walk. This is what makes cross-team staffing work: a Direct Tax senior can be staffed onto an audit engagement without breaking either the org chart or the permission model.
 
+**Engagement membership grants engagement-wide read — except for observers.** Being assigned a task on an engagement you do not already belong to attaches you to it as an `OBSERVER`, and an observer membership opens nothing on its own: you reach your own task through the assignee relationship and see none of the engagement's other work. Anything else — Member, In-charge, Manager, Partner — is a working membership and does see the whole engagement. See §4.
+
 Unauthorised reads return **404, never 403**. A 403 would confirm the record exists, which is what someone probing task IDs is trying to learn.
 
 ### Application
 
 - **Authentication** — Auth.js, session carries only a user id; role and scope re-read from the database on every request, so deactivating someone takes effect immediately
 - **Task API** — create, update, assign, transition, block, contributors, list. Optimistic locking on every write; the activity log written inside the same transaction as the change it records
-- **My Work** — one prioritised list (overdue → sent back → due today → awaiting review → blocked → this week → later), not four widgets
+- **My Work** — one prioritised list (overdue → sent back → due today → awaiting review → blocked → this week → later), not four widgets. Below it, separated, **"Waiting on someone else"** — open work you asked a colleague for, which is otherwise on no screen you own. Excluded from every workload figure, because it is not your work
+- **Cross-department requesting** — any employee may create a task on an engagement they belong to and assign it to anyone active in the firm, whatever team they are in. Departments have never been a permission boundary here. The requester gains no authority over the work: they cannot reassign it, move its deadline, change its priority, cancel it, or log time against it
 - **Quick create** — four visible fields, `N` to open, Ctrl+Enter to save, stays open for creating in runs. The assignee picker shows each person's current load, so overload is visible *at the moment of delegation*
 - **Task detail** — description, people, dates, estimate vs actual, subtasks, full history in plain sentences
 - **Status workflow** — only the transitions the kernel permits are rendered; reasons are dialogs, not skippable fields; conflicts offer reload, never silent retry
@@ -57,7 +60,8 @@ Unauthorised reads return **404, never 403**. A 403 would confirm the record exi
 - **Forgotten-timer watchdog** — `npm run watchdog` (and `--dry-run`). Suspends rather than guessing; a suspended entry counts toward nothing until its owner says what they worked
 - **Notifications** — a panel in the header. You are told when work is assigned to you, when it is sent back, when someone mentions you, when a deadline of yours moves, and when you are added as a contributor. Nothing else
 - **Team dashboard** — what's at risk, where the load is, what each client is absorbing. No completion rates, no estimate accuracy, no ranking of people
-- **Browse** — every task you can see, with full-text search and filters that live in the URL, so a filtered view can be bookmarked and pasted into an email
+- **Browse** — every task you can see, with full-text search and filters that live in the URL, so a filtered view can be bookmarked and pasted into an email. Search is scoped before it is capped, so your own matching work cannot be pushed off the end by the rest of the firm's
+- **"Asked by" on Team and Browse** — a row names who *requested* the work as well as who is doing it, but only when that is news: nothing is shown when the assignee created their own task, or when you did. Discloses nothing new — the name was already on the task page — and is what makes a cross-department request visible at a glance instead of one click at a time
 - **Clients** — the map: which clients, which engagements, what's open and late, hours to date. Every row leads into Browse
 - **Reports** — where the hours went, by client, engagement and person over any date range, downloadable as a two-sheet spreadsheet
 
@@ -83,10 +87,17 @@ Being explicit, because the foundation makes the product look further along than
 | Stage | What's missing |
 |---|---|
 | **12** | **Email notifications** — the in-app half is built; email is not. See below |
-| **15** | **Weekly timesheet approval** — designed and decided, not built. Without it, hours are recorded but never *confirmed* by anyone |
 | **16** | Security testing, load testing, deployment |
 
-Stages 8 to 15 are complete, bar email and timesheet approval.
+Stages 8 to 15 are complete, bar email.
+
+**Weekly timesheet approval is OUT OF SCOPE**, decided 31 August 2026. It was
+previously listed here as designed-but-unbuilt, which read as an outstanding
+debt. It is not: it will not be built in this release, and no approval tables,
+states, screens or API exist. The consequence to state plainly is that hours are
+recorded and never formally confirmed by anyone — accepted deliberately, not
+overlooked. The reasoning behind the original design is kept in §4 and in the
+Product Specification, because the decision may be revisited later.
 
 **On email:** it is not merely unbuilt, it is *blocked by a decision you made deliberately*. Microsoft Graph was excluded from the Entra app registration IT is approving, so sending mail needs a second approval round. The engine is channel-agnostic and `notifications.email_sent_at` is the seam — adding email later means a sender and a job, not a redesign. Until then, people are told only while they are in the app, which is the honest limitation to state to whoever approves this.
 
@@ -115,7 +126,8 @@ What IT needs to create: a single-tenant app registration, redirect URI `/api/au
 | **Client → Engagement → Task** | A "project" that doesn't roll up to a client can't answer "how many hours on ABC Ltd's audit" |
 | **One accountable assignee, plus contributors** | Multiple assignees destroy accountability and make workload arithmetic impossible |
 | **Blocked is a flag, not a status** | A status loses where the work actually was |
-| **Assignment adds you to the engagement** | Putting work on someone's plate *is* staffing them |
+| **Assignment attaches you to the engagement as an OBSERVER** | Revised 31 Aug 2026. Putting work on someone's plate *is* attaching them, and the record has to stay accurate because `ensureEngagementMembership` is the only writer of membership in the application. But it is not *staffing* them: assignment used to write MEMBER, which granted read access to every task on the engagement — so borrowing a specialist for one job handed them the whole client file. Nobody decided that; it fell out of two reasonable rules meeting. An existing membership is never downgraded |
+| **Weekly timesheet approval is out of scope** | Decided 31 Aug 2026. The reasoning below is kept because the decision may be revisited |
 | **Estimate accuracy never enters an appraisal** | Score it and everyone pads; within a quarter the data — and the capacity planning built on it — is worthless |
 | **Weekly timesheet approval, not per-entry** | Per-entry review is rigorous on paper and rubber-stamped in practice |
 | **Workload counts leaf tasks only** | Counting a parent and its subtasks double-counts the same work |
@@ -150,18 +162,22 @@ What IT needs to create: a single-tenant app registration, redirect URI `/api/au
 ## 6. Technical debt
 
 - `package.json#prisma` is deprecated; must move to `prisma.config.ts` before Prisma 7
-- Test fixtures rebuild per test (~32s for the service suite); batching the inserts would cut most of that
+- Test fixtures rebuild per test; batching the inserts would cut most of that. The full suite runs in about three minutes
+- `npm run db:test` shells out to `psql -U postgres` and prompts for a password, so it cannot run unattended or in CI
 - 7 npm audit findings in transitive dependencies, for Stage 16
+- Four unused dependencies (`lucide-react`, `clsx`, `class-variance-authority`, `tailwind-merge`) to remove before deployment
 - Historical team reports follow the *current* reporting line, not the line as at the time
+- **A manager sees work their staff requested only where they already have a relationship to it.** There is no "created by someone who reports to me" visibility rule. Raised and deliberately not acted on — it would widen the permission model
+- **A Staff member assigning work to a Senior attaches that Senior to the engagement**, and `canManageTask` still reads all memberships regardless of capacity — so that Senior can then direct every task on it. Pre-existing, unchanged by the observer work, and the one place the old over-grant survives. Open decision
 
 ---
 
 ## 7. How to run it
 
 ```powershell
-cd "D:\Data Backup\OnTrack"
+# from the project root
 npm run dev          # http://localhost:3100
-npm test             # 358 tests
+npm test             # 393 tests
 npm run db:seed      # rebuild development data (destructive)
 npm run db:test      # bring the test database up to date after a migration
 npm run watchdog:dry # report timers past the ceiling, writing nothing

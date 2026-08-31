@@ -23,7 +23,7 @@ The brief describes a generic task tracker. That is not what this firm needs, an
 | 5 | **Recurrence is core, not advanced** | Roughly 60–70% of a CA firm's task volume is statutory and repeating — GSTR-1 on the 11th, GSTR-3B on the 20th, TDS quarterly, advance tax, ITR, audit. If someone must hand-create 400 tasks each month, the system dies. A recurrence engine ships in V1. |
 | 6 | **Blocked is a flag, not a status** | Making Blocked a status loses the information about *where* the work actually was. A blocked task is still In Progress with an impediment. Flag + reason + expected-unblock date. |
 | 7 | **Time entries are the source of truth; `actual_time` is a cache** | Never let a task carry an authoritative hours number that can drift from its entries. |
-| 8 | **Weekly timesheet approval, not per-entry approval** | Per-entry manager approval sounds rigorous and is never actually done in a 50-person firm; managers rubber-stamp it. Weekly submit → approve → period lock is the granularity that gets genuinely reviewed. |
+| 8 | **Weekly timesheet approval, not per-entry approval** | Per-entry manager approval sounds rigorous and is never actually done in a 50-person firm; managers rubber-stamp it. Weekly submit → approve → period lock is the granularity that gets genuinely reviewed. **CORRECTION — 31 Aug 2026: timesheet approval of any kind is OUT OF SCOPE for this release and is not built.** The reasoning above is kept because the decision may be revisited; the `/team/approvals` route in §12 does not exist. |
 | 9 | **Estimate accuracy must never enter an individual's appraisal** | The moment estimates are scored, everyone pads them, and within one quarter your estimate data is worthless — destroying the very capability the brief asks for (Q14, "how accurate are our time estimates?"). Estimate accuracy is a *team-level planning* metric. This is a governance policy the system must enforce by design, not just a feature. |
 | 10 | **No Elasticsearch, no Redis, no microservices** | At 100 users and perhaps 250,000 tasks over five years, PostgreSQL full-text search and a Postgres-backed job queue are comfortably sufficient. Every extra moving part is an operational tax on a firm with no dedicated DevOps team. |
 | 11 | **The whole system lives or dies on whether logging time takes under 20 seconds a day** | Every UX decision below is subordinate to this. Adoption is the #1 risk; it is not a technical risk. |
@@ -122,6 +122,23 @@ The fix: **role gives capability, scope gives reach.** A permission check is alw
 | **Observer** | Not a global role — a *per-engagement* membership capacity | Read-only on one engagement. Used for external consultants, cross-team stakeholders, and trainees. |
 
 The brief's "Viewer" is genuinely useful but should be scoped, not global. A global read-only role has exactly one legitimate use — the firm's own IT auditor — and that is better served by a time-boxed Admin grant with audit logging.
+
+> **CORRECTION — 31 August 2026.** `OBSERVER` was built, but it does **not** mean
+> what this row describes. As implemented it is *narrower*: an observer is
+> attached to a **specific task**, not granted read-only access to the
+> engagement. They see the work they were given and none of the engagement's
+> other tasks.
+>
+> It also arrives differently. Nobody assigns the capacity by hand — there is no
+> screen for engagement membership at all. It is written automatically when
+> somebody is assigned a task on an engagement they do not already belong to,
+> which is what makes cross-department requesting safe: asking a colleague in
+> another team for one piece of work no longer hands them the client's whole
+> file. An existing membership is never downgraded.
+>
+> The "external consultants and trainees" use case this row imagines — read-only
+> across a whole engagement — is **not built**, and would need a screen to grant
+> it. See `docs/Project Status.md` §4.
 
 ## 3.3 Scopes
 
@@ -806,6 +823,14 @@ CRUD   /admin/users, /admin/recurrence-rules, /admin/categories, /admin/calendar
 /admin/*                 Users · teams · clients · categories · recurrence · calendar · settings · audit log
 /me                      Profile, notification preferences, saved views
 ```
+
+> **CORRECTION — 31 August 2026.** This is the *designed* route map, not the
+> built one. What exists today is `/tasks` (My Work, with quick-create in place
+> of `/tasks/new`), `/tasks/:key`, `/timesheet`, `/team`, `/clients`, `/browse`,
+> `/reports`, `/notifications` and `/signin`. `/team/approvals` is not built and
+> will not be — timesheet approval is out of scope. `/review`, `/engagements/:id`,
+> `/calendar`, `/admin/*` and `/me` are not built. `/browse` is the search and
+> filter screen this map does not name.
 
 **UX commitments:**
 

@@ -1,6 +1,6 @@
 # OnTrack — Stack and Capability
 
-**As at:** 27 August 2026 · **358 tests passing · 9 migrations · 22 tables**
+**As at:** 31 August 2026 · **393 tests passing · 10 migrations · 21 tables**
 
 Two questions answered here: *what does this software depend on*, and *what can it actually do today*.
 
@@ -64,7 +64,7 @@ A development-only credentials provider covers local work, hard-disabled outside
 
 | | Version | |
 |---|---|---|
-| **Vitest** | 3.2.7 | 306 tests against a real PostgreSQL database (`ontrack_test`), not mocks |
+| **Vitest** | 3.2.7 | 393 tests across 20 files against a real PostgreSQL database (`ontrack_test`), not mocks |
 | **tsx** | 4.19 | Runs the seed and the watchdog job |
 
 Test files run **sequentially, not in parallel** — they share one physical database and truncate between cases. Parallel runs produced failures that moved around between runs and looked like flaky code rather than a broken harness.
@@ -129,6 +129,8 @@ Named because the absence is a decision, not an oversight — and because these 
 
 Visibility is a **union of relationships** — assignee, contributor, reviewer, creator, engagement member, line manager, engagement partner, client relationship partner — not an org-chart walk. This is what makes cross-team staffing work: a tax senior can be put on an audit engagement without breaking either the org chart or the permission model.
 
+**Being given one task is not the same as joining the engagement.** Assignment attaches the assignee to the engagement as an `OBSERVER`, and an observer membership grants no engagement-wide read: they reach their own task through the assignee relationship and see nothing else there. Every other capacity — Member, In-charge, Manager, Partner — is a working membership and does see the whole engagement. An existing membership is never downgraded by a later assignment.
+
 Unauthorised reads return **404, never 403**. A 403 confirms the record exists, which is what someone probing IDs is trying to learn. Verified in the browser: a real-but-unauthorised user id and a nonexistent one produce byte-identical pages.
 
 ## Working features
@@ -136,7 +138,8 @@ Unauthorised reads return **404, never 403**. A 403 confirms the record exists, 
 | Area | What works |
 |---|---|
 | **Task lifecycle** | Create, assign, update, transition, block, cancel, reopen. Optimistic locking on every write; the activity log written in the same transaction as the change it records |
-| **My Work** | One prioritised list — overdue → sent back → due today → awaiting review → blocked → this week → later. Not four widgets |
+| **My Work** | One prioritised list — overdue → sent back → due today → awaiting review → blocked → this week → later. Not four widgets. Below it, "Waiting on someone else": work you asked a colleague for, kept out of the priority bands and out of every workload figure |
+| **Cross-department requesting** | Any employee may create work on an engagement they belong to and assign it to anyone active, whatever team they are in. The requester gains no authority over it — no reassign, deadline, priority, cancel, or time logging |
 | **Quick create** | Four visible fields, `N` to open, Ctrl+Enter to save, stays open for creating in runs. The assignee picker shows current load, so overload is visible *at the moment of delegation* |
 | **Task detail** | Description, people, dates, estimate vs actual, subtasks, and the full history rendered as plain sentences |
 | **Status workflow** | Only transitions the kernel permits are rendered. Reasons are dialogs, not skippable fields. Conflicts offer reload, never silent retry |
@@ -147,7 +150,8 @@ Unauthorised reads return **404, never 403**. A 403 confirms the record exists, 
 | **Forgotten-timer watchdog** | `npm run watchdog`. Suspends rather than guessing — a suspended entry counts toward nothing until its owner says what they actually worked |
 | **Notifications** | A panel in the header. Assigned, sent back, mentioned, deadline moved, added as contributor. Nothing else |
 | **Team dashboard** | What's at risk, where the load is, what each client is absorbing |
-| **Browse** | Full-text search over titles and descriptions, plus filters that live in the URL — a filtered view is a link you can send |
+| **Browse** | Full-text search over titles and descriptions, plus filters that live in the URL — a filtered view is a link you can send. The search is scoped to what you may see *before* its row cap applies, so your own matching work cannot be pushed out by the rest of the firm's |
+| **"Asked by"** | Team and Browse rows name who requested the work as well as who is doing it — but only when it is news, so nothing shows on your own requests or on work someone gave themselves |
 | **Clients** | The map of clients and engagements, scoped by the work you can actually see |
 | **Reports** | Where the hours went, over any range, with a two-sheet spreadsheet whose Detail rows sum to its Summary total |
 
@@ -169,13 +173,18 @@ Demonstrated rather than asserted: `prisma/sql/examples/` holds two runnable con
 | | |
 |---|---|
 | **Email notifications** | Blocked by a deliberate decision — Microsoft Graph was excluded from the Entra registration, so mail needs a second approval round. The engine is channel-agnostic; `notifications.email_sent_at` is the seam |
-| **Filtering and search UI** | Stage 14. The `tsvector` column and indexes exist; no screen uses them |
-| **Reports and export** | Stage 15, including weekly timesheet approval, which is designed but unbuilt |
 | **Security and load testing, deployment** | Stage 16 |
+| **Weekly timesheet approval** | **Out of scope**, decided 31 August 2026. Not designed-and-pending: it will not be built in this release. Hours are recorded and never formally confirmed by anyone, which is the honest limitation to state |
 | **Configurable statuses** | Design settled (organisation-chosen label plus engine-owned category), deferred while all status logic funnels through one file |
 | **Recurring tasks** | Schema and rules exist; the generation job does not |
 | **Attachments** | Schema exists; Azure Blob wiring does not |
-| **`/clients` and `/tasks/all`** | Both are live links in the navigation and both currently 404. Stage 14 |
+| **Admin CRUD** | No screens for managing users, roles, clients, engagements or engagement membership. `manage.work_areas` is granted to Partner and checked nowhere. Membership is written only as a side-effect of assignment, or by the seed |
+| **Tag management** | Tags are seeded, indexed for search and filterable, but there is no screen to create one or attach it to a task |
+
+Previously listed here and **since built**: filtering and search UI (Stage 14),
+reports and Excel export (Stage 15), and the nav links that used to 404 —
+`/clients`, and the browse screen, which shipped as `/browse` rather than the
+`/tasks/all` this document originally named (Stage 14).
 
 ---
 
