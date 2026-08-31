@@ -54,6 +54,32 @@ interface ErrorBody {
   current?: unknown;
 }
 
+/**
+ * No usable session: not signed in, or signed in as somebody who is no longer
+ * active.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * 401, and deliberately the SAME 401 for both. "Your account was deactivated"
+ * would confirm to whoever holds the cookie that the account is real, which is
+ * the same reasoning that makes an unauthorised read a 404 rather than a 403.
+ *
+ * This exists because the API used to reach `requireActingUser()`, which
+ * REDIRECTS. Inside a route handler that redirect is thrown, caught by
+ * `route()`, and falls through `mapError` to a 500 — so a leaver's browser tab
+ * refreshing produced "Something went wrong" and an `[api] unhandled error`
+ * line in the log. Wrong status, and a routine condition logged as a fault.
+ *
+ * A redirect to an HTML sign-in page was never the right answer for a JSON
+ * client in any case.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+export function unauthorised(): Response {
+  return json(
+    { error: "unauthorized", message: "Sign in required." } satisfies ErrorBody,
+    401
+  );
+}
+
 export function mapError(e: unknown): Response {
   if (e instanceof NotFoundError) {
     // Deliberately generic. NotFoundError("Task") carries "Task not found"
