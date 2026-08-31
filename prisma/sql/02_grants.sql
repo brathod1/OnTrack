@@ -4,10 +4,23 @@
 -- WHEN TO RUN: AFTER the Prisma migration has created the tables. Re-run after
 --              any migration that adds a table (or rely on the ALTER DEFAULT
 --              PRIVILEGES block at the end, which covers future tables).
--- RUN AS:      the postgres superuser, connected to the `ontrack` database.
+-- RUN AS:      `ontrack_owner` is SUFFICIENT for this file, and is what
+--              `npm run db:test` uses. The postgres superuser is required for
+--              the INITIAL setup only — CREATE DATABASE, and 00_roles.sql,
+--              which creates roles. This file creates nothing: it grants and
+--              revokes on objects that already exist, and in PostgreSQL you
+--              may grant on what you own. ontrack_owner owns the database, the
+--              public schema (via pg_database_owner) and every table in it.
+--
+--              Using the superuser here meant a password that lives nowhere in
+--              the project, so the script that runs this could only ever work
+--              with a human present to type it.
 -- DESTRUCTIVE: no. Grants and revokes privileges. Touches no data.
 --
---   psql -U postgres -h localhost -d ontrack -f prisma/sql/02_grants.sql
+--   psql -v ON_ERROR_STOP=1 -U ontrack_owner -h localhost -d ontrack -f prisma/sql/02_grants.sql
+--
+-- ON_ERROR_STOP=1 matters: without it psql skips a failing statement and still
+-- exits 0, so a half-applied grants run looks like a successful one.
 --
 -- ── Why this file exists ───────────────────────────────────────────────────
 -- The activity log must be append-only. "The application never updates it" is

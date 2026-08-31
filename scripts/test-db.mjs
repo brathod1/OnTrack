@@ -69,6 +69,34 @@ console.log(`Target: ${mask(ownerUrl)}\n`);
 
 const childEnv = { ...process.env, DATABASE_URL: appUrl, DIRECT_DATABASE_URL: ownerUrl };
 
+/**
+ * Connection details for psql, taken from the URL Prisma already uses.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * The grants step used to run as the `postgres` SUPERUSER, whose password is
+ * nowhere in this project — `.env` carries `ontrack_app` and `ontrack_owner`
+ * and nothing else. So psql fell back to asking a human, which is fine at a
+ * terminal and a hang anywhere else: CI, a scheduled run, or any script.
+ *
+ * A superuser was never needed here. `00_roles.sql` creates roles and does
+ * need one; `02_grants.sql` creates nothing. It grants and revokes on objects
+ * that already exist, and in PostgreSQL you may grant on what you own —
+ * `ontrack_owner` owns the database, the `public` schema (via
+ * `pg_database_owner`) and every table in it.
+ *
+ * The password is passed through PGPASSWORD in the CHILD ENVIRONMENT rather
+ * than in the connection string, so it never reaches the command line and
+ * cannot be read out of the process list.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+const owner = new URL(ownerUrl);
+const psqlEnv = {
+  ...childEnv,
+  // Percent-decoded: a password containing @ or / must be encoded in the URL
+  // and would otherwise be sent to the server in its encoded form.
+  PGPASSWORD: decodeURIComponent(owner.password),
+};
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     stdio: "inherit",
@@ -88,6 +116,23 @@ console.log("\n── Re-applying grants ─────────────
 // Needed after any migration that adds a table: a new table arrives with no
 // privileges for ontrack_app. The file uses current_database(), so the same
 // script is correct against any database.
-run("psql", ["-U", "postgres", "-h", "localhost", "-d", TEST_DB, "-f", "prisma/sql/02_grants.sql"]);
+//
+// ON_ERROR_STOP=1 is not optional. Without it psql skips past a failing
+// statement, carries on, and EXITS 0 — so a grants run that half-worked was
+// reported here as "✔ up to date" while ontrack_app quietly lacked
+// privileges. Measured, not assumed: the same file with one bad statement
+// exits 0 without this flag and 3 with it.
+run(
+  "psql",
+  [
+    "-v", "ON_ERROR_STOP=1",
+    "-U", decodeURIComponent(owner.username),
+    "-h", owner.hostname,
+    "-p", owner.port || "5432",
+    "-d", TEST_DB,
+    "-f", "prisma/sql/02_grants.sql",
+  ],
+  { env: psqlEnv }
+);
 
 console.log(`\n✔ ${TEST_DB} is up to date. Your shell still points at ${DEV_DB}.`);
