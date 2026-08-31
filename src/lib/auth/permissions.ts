@@ -12,7 +12,7 @@
  * ─────────────────────────────────────────────────────────────────────────
  */
 
-import { Prisma, TaskStatus } from "@prisma/client";
+import { EngagementCapacity, Prisma, TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { CAP, isCapability, type Capability } from "./capabilities";
 
@@ -39,8 +39,32 @@ export interface ActingUser {
   teamId: bigint | null;
   /** Transitive closure of everyone below this user in the reporting line. */
   reportChainIds: bigint[];
-  /** Engagements where this user has an active membership. */
+
+  /**
+   * Engagements where this user has an active membership, WHATEVER its capacity.
+   *
+   * This is the staffing record — "is this person attached to this engagement" —
+   * and it is what `canManageTask` and `canCreateTask` ask about. It is NOT the
+   * right question for read scope; see `visibleEngagementIds`.
+   */
   engagementIds: bigint[];
+
+  /**
+   * Engagements whose WHOLE task list this user may read.
+   *
+   * ─────────────────────────────────────────────────────────────────────────
+   * The subset of `engagementIds` excluding OBSERVER memberships, which are
+   * written automatically when someone is assigned a task on an engagement they
+   * did not already belong to.
+   *
+   * The two are separate because being given one job and being staffed onto an
+   * engagement are different things that had collapsed into one. A specialist
+   * borrowed from another team reaches their own task through the assignee
+   * relationship; they have no business reading the rest of the engagement, and
+   * before this split they could.
+   * ─────────────────────────────────────────────────────────────────────────
+   */
+  visibleEngagementIds: bigint[];
 }
 
 /**
@@ -120,7 +144,10 @@ export async function loadActingUser(userId: bigint): Promise<ActingUser> {
     }),
     prisma.engagementMember.findMany({
       where: { userId, OR: [{ validTo: null }, { validTo: { gt: new Date() } }] },
-      select: { engagementId: true },
+      // Capacity is selected because the kernel READS it: everything except
+      // OBSERVER confers engagement-wide read. Fetched here, in the one place
+      // the acting user is assembled, so no caller has to know the rule.
+      select: { engagementId: true, capacity: true },
     }),
     loadReportChain(userId),
   ]);
@@ -144,6 +171,15 @@ export async function loadActingUser(userId: bigint): Promise<ActingUser> {
     teamId: user.teamId,
     reportChainIds,
     engagementIds: memberships.map((m) => m.engagementId),
+    // An OBSERVER is attached to particular work, not staffed onto the
+    // engagement, so their membership alone opens nothing. Expressed as
+    // "not OBSERVER" rather than a list of the capacities that DO qualify:
+    // a capacity added later should grant engagement-wide read by default and
+    // be excluded deliberately, not be silently blind until someone remembers
+    // to add it here.
+    visibleEngagementIds: memberships
+      .filter((m) => m.capacity !== EngagementCapacity.OBSERVER)
+      .map((m) => m.engagementId),
   };
 }
 
@@ -174,9 +210,14 @@ export function visibleTaskFilter(user: ActingUser): Prisma.TaskWhereInput {
     { assignedById: user.id }, //    ...or assigner
   ];
 
-  // 5. Active member of the task's engagement.
-  if (user.engagementIds.length > 0) {
-    relationships.push({ engagementId: { in: user.engagementIds } });
+  // 5. Staffed onto the task's engagement — NOT merely attached to one job on
+  //    it. `visibleEngagementIds`, not `engagementIds`: an OBSERVER membership
+  //    is written automatically whenever someone is assigned work on an
+  //    engagement they did not already belong to, and it must open nothing on
+  //    its own. Whoever was borrowed for one task reaches that task through
+  //    relationship 1 and sees no more of the engagement than that.
+  if (user.visibleEngagementIds.length > 0) {
+    relationships.push({ engagementId: { in: user.visibleEngagementIds } });
   }
 
   // 6. Line-manages the assignee, transitively.

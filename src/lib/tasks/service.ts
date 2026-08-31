@@ -227,21 +227,41 @@ export async function createTask(user: ActingUser, input: CreateTaskInput) {
 }
 
 /**
- * Assigning someone to a task puts them on the engagement.
+ * Assigning someone to a task attaches them to the engagement — as an OBSERVER.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * A judgement call, so it is worth stating plainly.
  *
  * The alternative rules are both worse. Refusing to assign non-members means
  * managers hit a wall constantly, because staffing changes daily and nobody
- * maintains a membership list in advance. Allowing it without membership
- * leaves someone holding one orphan task on an engagement they cannot
- * otherwise see — no context, no colleagues' work, no engagement view.
+ * maintains a membership list in advance. Not recording the attachment at all
+ * would leave this function's callers as the only trace, and there is no other
+ * writer of engagement membership in the application — no admin screen, and
+ * `manage.work_areas` has no implementation — so membership would simply stop
+ * being accurate.
  *
- * In a firm, putting work on someone's plate IS staffing them. Doing it
- * implicitly keeps membership accurate with no one maintaining it, which is
- * what makes every engagement report truthful. It is logged as its own event,
- * so it is never silent.
+ * ── WHY OBSERVER AND NOT MEMBER ──────────────────────────────────────────
+ * This used to write MEMBER, and engagement membership grants visibility of
+ * every task on the engagement (`visibleTaskFilter` relationship 5). The two
+ * rules chained: giving a specialist from another team one piece of work
+ * handed them read access to the entire engagement.
+ *
+ * Nobody decided that. It fell out of two reasonable rules meeting — "putting
+ * work on someone's plate is staffing them", which is right for staffing, and
+ * "members see the engagement", which is right for members. Being borrowed for
+ * one job is neither, and cross-department collaboration makes it the common
+ * case rather than the odd one.
+ *
+ * So the attachment is still recorded, still logged, and still keeps the
+ * membership list complete for reporting and for the mention picker. What it
+ * no longer does is open the rest of the engagement. The assignee reaches
+ * their own task through the assignee relationship, which is the relationship
+ * that actually describes why they are there.
+ *
+ * AN EXISTING MEMBERSHIP IS NEVER TOUCHED. The early return below predates
+ * this change and is now load-bearing: assigning work to someone already
+ * staffed onto the engagement must not quietly demote them to OBSERVER and
+ * take away access they legitimately hold.
  * ─────────────────────────────────────────────────────────────────────────
  */
 async function ensureEngagementMembership(
@@ -257,16 +277,22 @@ async function ensureEngagementMembership(
     },
     select: { id: true },
   });
+  // Already attached in some capacity — leave it exactly as it is. Upserting a
+  // capacity here would demote a manager to OBSERVER the first time somebody
+  // assigned them a task on their own engagement.
   if (existing) return;
 
   await tx.engagementMember.create({
-    data: { engagementId, userId, capacity: EngagementCapacity.MEMBER },
+    data: { engagementId, userId, capacity: EngagementCapacity.OBSERVER },
   });
 
   await recordActivity(tx, {
     actorId, action: ActivityAction.CONTRIBUTOR_ADDED,
-    field: "engagementMember", newValue: { engagementId, userId },
-    reason: "added to the engagement automatically on assignment",
+    field: "engagementMember",
+    newValue: { engagementId, userId, capacity: EngagementCapacity.OBSERVER },
+    // The old wording said "added to the engagement", which now overstates
+    // what happened and would read as a bigger grant than it is.
+    reason: "attached to the engagement automatically on assignment (observer)",
   });
 }
 

@@ -50,11 +50,29 @@ enum UserStatus {
   INACTIVE // leaver; never deleted
 }
 
+/// How someone is attached to an engagement.
+///
+/// ─────────────────────────────────────────────────────────────────────────
+/// CAPACITY IS READ BY THE PERMISSION KERNEL — it is not decoration. Everything
+/// except OBSERVER is a working membership and grants engagement-wide task
+/// visibility through `visibleTaskFilter`. OBSERVER does not.
+///
+/// The distinction exists because assigning someone a task and staffing them
+/// onto an engagement are different acts that had become the same one. A
+/// specialist borrowed from another team for a single piece of work was being
+/// handed read access to every task on the engagement, which is not what
+/// putting one job on their plate should mean.
+/// ─────────────────────────────────────────────────────────────────────────
 enum EngagementCapacity {
   PARTNER
   MANAGER
   IN_CHARGE
   MEMBER
+  /// Attached to specific work, not staffed onto the engagement. Written
+  /// automatically when someone is assigned a task on an engagement they do
+  /// not already belong to; see `ensureEngagementMembership`. They reach their
+  /// own task through the assignee relationship and see nothing else here.
+  OBSERVER
 }
 
 enum EngagementStatus {

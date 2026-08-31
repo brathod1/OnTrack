@@ -1,0 +1,33 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- OBSERVER: attached to specific work, not staffed onto the engagement.
+--
+-- ── The defect this closes ─────────────────────────────────────────────────
+-- Assigning someone a task adds them to its engagement (ensureEngagementMember-
+-- ship), and engagement membership grants visibility of EVERY task on that
+-- engagement (visibleTaskFilter relationship 5). Chaining those two, giving a
+-- specialist from another team one piece of work handed them read access to
+-- the whole engagement.
+--
+-- That was never a decision anyone made. It fell out of two reasonable rules
+-- meeting: "putting work on someone's plate is staffing them", which is right
+-- for staffing, and "members see the engagement", which is right for members.
+-- Borrowing someone for one job is neither.
+--
+-- ── Why a capacity rather than dropping the auto-membership ────────────────
+-- ensureEngagementMembership is the ONLY writer of engagement membership in
+-- the application — there is no admin screen and manage.work_areas has no
+-- implementation. Removing the auto-add would leave no way to staff anyone
+-- outside the seed, breaking real staffing to fix borrowing.
+--
+-- So membership is still written, and stays complete for reporting and the
+-- mention list. What narrows is what an AUTO-ADDED membership means.
+--
+-- ── Safe to apply ──────────────────────────────────────────────────────────
+-- Purely additive. No existing row changes: every membership written before
+-- this migration keeps the capacity it has, and therefore keeps the visibility
+-- it has. Nothing is backfilled, deliberately — silently reclassifying
+-- people's existing access is not a migration's business.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- AlterEnum
+ALTER TYPE "EngagementCapacity" ADD VALUE 'OBSERVER';

@@ -159,9 +159,14 @@ export function describeActivity(
 
     case "CONTRIBUTOR_ADDED":
       // Two events share this action: adding a contributor to the task, and
-      // the automatic engagement membership that assignment creates.
+      // the automatic engagement attachment that assignment creates.
+      //
+      // "attached to" rather than "added to": what assignment writes is an
+      // OBSERVER membership, which does not open the engagement's other work.
+      // "Added to the engagement" would describe a wider grant than the one
+      // that actually happened, in the log people read to check exactly that.
       return entry.field === "engagementMember"
-        ? { verb: "added", detail: `${to} to the engagement`, tone: "neutral" }
+        ? { verb: "attached", detail: `${to} to the engagement`, tone: "neutral" }
         : { verb: "added", detail: `${to} as a contributor`, tone: "neutral" };
 
     case "CONTRIBUTOR_REMOVED":
