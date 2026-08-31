@@ -45,16 +45,30 @@ async function makeTask(opts: {
   reviewerId?: bigint;
   isBlocked?: boolean;
   reviewRound?: number;
+  /** Who asked for the work. Defaults to Meera, as most fixtures assume. */
+  createdById?: bigint;
+  contributorIds?: bigint[];
 }) {
   keySeq += 1;
+  const createdById = opts.createdById ?? firm.users.meera;
   return prisma.task.create({
     data: {
       displayKey: `TSK-MW-${String(keySeq).padStart(5, "0")}`,
       title: opts.title,
       engagementId: firm.engagements.a1,
       parentTaskId: opts.parentTaskId ?? null,
-      createdById: firm.users.meera,
-      assignedById: firm.users.meera,
+      createdById,
+      assignedById: createdById,
+      ...(opts.contributorIds?.length
+        ? {
+            contributors: {
+              create: opts.contributorIds.map((userId) => ({
+                userId,
+                addedById: createdById,
+              })),
+            },
+          }
+        : {}),
       assigneeId: opts.assigneeId,
       reviewerId: opts.reviewerId ?? null,
       reviewRequired: Boolean(opts.reviewerId),
@@ -247,5 +261,142 @@ describe("formatMinutes", () => {
     expect(formatMinutes(205)).toBe("3h 25m");
     // Never "3.42 hours" — nobody can act on a decimal hour.
     expect(formatMinutes(205)).not.toContain(".");
+  });
+});
+
+/**
+ * Work you asked somebody else to do.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * THE GAP THESE PIN: you could create a task for a colleague and then have
+ * nowhere to find it. My Work listed work where you are the assignee,
+ * contributor or reviewer — and a requester is none of those. The kernel was
+ * always willing to show the task (creator is a visibility relationship);
+ * there was no screen that listed it, and a Staff user, having no Browse
+ * screen, could not navigate to it at all.
+ *
+ * Harmless while delegating was something managers did on managers' screens.
+ * Cross-department requesting makes it routine.
+ *
+ * The other half of these tests is what must NOT happen: delegated work is not
+ * yours to do, so it must stay out of the priority bands and out of every
+ * number describing your own load.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+describe("work you are waiting on someone else for", () => {
+  it("appears, so a requester can find what they asked for", async () => {
+    const task = await makeTask({
+      title: "Excel pivot for the GST reconciliation",
+      createdById: firm.users.eshan,
+      assigneeId: firm.users.ellie,
+      dueOffset: 5,
+    });
+
+    const work = await getMyWork(eshan);
+    expect(work.requested.map((t) => t.displayKey)).toEqual([task.displayKey]);
+  });
+
+  it("stays OUT of the priority bands — it is not yours to do", async () => {
+    await makeTask({
+      title: "Excel pivot for the GST reconciliation",
+      createdById: firm.users.eshan,
+      assigneeId: firm.users.ellie,
+      dueOffset: -3, // overdue: the band it would most loudly gatecrash
+    });
+
+    const work = await getMyWork(eshan);
+    const banded = work.bands.flatMap((b) => b.tasks.map((t) => t.displayKey));
+    expect(banded).toEqual([]);
+    expect(work.requested).toHaveLength(1);
+  });
+
+  it("is counted in NOBODY's workload figures", async () => {
+    // The whole point of the leaf-task rule is that one piece of work is
+    // counted once. Adding delegated work to the requester's hours would
+    // count it on two people's plates.
+    await makeTask({
+      title: "Excel pivot for the GST reconciliation",
+      createdById: firm.users.eshan,
+      assigneeId: firm.users.ellie,
+      dueOffset: 5,
+      estimate: h(6),
+    });
+
+    const work = await getMyWork(eshan);
+    expect(work.counts.total).toBe(0);
+    expect(work.counts.remainingMinutes).toBe(0);
+    expect(work.counts.unestimated).toBe(0);
+    expect(work.counts.overdue).toBe(0);
+  });
+
+  it("does not repeat work already on your own list", async () => {
+    // Created it AND reviewing it: it is already in the bands as a review, and
+    // listing it twice on one screen is how a screen stops being trusted.
+    await makeTask({
+      title: "Draft the computation",
+      createdById: firm.users.eshan,
+      assigneeId: firm.users.ellie,
+      reviewerId: firm.users.eshan,
+      status: TaskStatus.REVIEW,
+      dueOffset: 4,
+    });
+
+    const work = await getMyWork(eshan);
+    expect(work.requested).toEqual([]);
+    expect(work.counts.awaitingMyReview).toBe(1);
+  });
+
+  it("does not repeat work you are contributing to", async () => {
+    await makeTask({
+      title: "Joint reconciliation",
+      createdById: firm.users.eshan,
+      assigneeId: firm.users.ellie,
+      contributorIds: [firm.users.eshan],
+      dueOffset: 4,
+    });
+
+    const work = await getMyWork(eshan);
+    expect(work.requested).toEqual([]);
+    expect(work.counts.total).toBe(1);
+  });
+
+  it("does not list work you kept for yourself", async () => {
+    await makeTask({
+      title: "My own task",
+      createdById: firm.users.eshan,
+      assigneeId: firm.users.eshan,
+      dueOffset: 4,
+    });
+
+    const work = await getMyWork(eshan);
+    expect(work.requested).toEqual([]);
+    expect(work.counts.total).toBe(1);
+  });
+
+  it("drops off once the work is done — this is a waiting list, not a history", async () => {
+    await makeTask({
+      title: "Finished favour",
+      createdById: firm.users.eshan,
+      assigneeId: firm.users.ellie,
+      dueOffset: 2,
+      status: TaskStatus.COMPLETED,
+    });
+
+    expect((await getMyWork(eshan)).requested).toEqual([]);
+  });
+
+  it("shows you nobody else's delegations", async () => {
+    // Meera asks Ellie for something. It is on neither of Eshan's lists,
+    // whatever else he can see.
+    await makeTask({
+      title: "Meera's request",
+      createdById: firm.users.meera,
+      assigneeId: firm.users.ellie,
+      dueOffset: 5,
+    });
+
+    const work = await getMyWork(eshan);
+    expect(work.requested).toEqual([]);
+    expect(work.bands).toEqual([]);
   });
 });

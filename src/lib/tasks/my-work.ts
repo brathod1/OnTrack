@@ -50,8 +50,14 @@ const listSelect = {
   reviewRound: true,
   assigneeId: true,
   reviewerId: true,
+  // Both added for the "Waiting on someone else" list: `createdById` is how a
+  // row works out that you are the REQUESTER rather than a contributor, and
+  // the contributor ids are how that list avoids repeating work already shown
+  // above it.
+  createdById: true,
   updatedAt: true,
   assignee: { select: { id: true, name: true } },
+  contributors: { select: { userId: true } },
   engagement: {
     select: {
       id: true,
@@ -104,6 +110,60 @@ async function fetchMyOpenTasks(user: ActingUser) {
     select: listSelect,
     orderBy: [{ dueDate: "asc" }, { id: "asc" }],
   });
+}
+
+/**
+ * Work you asked someone else to do.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * WHY THIS EXISTS: you could create a task for a colleague and then have
+ * nowhere to find it again. My Work lists what is on YOUR plate — assignee,
+ * contributor, reviewer — and a requester is none of those. The permission
+ * kernel was always happy to show them the task (creator is one of the
+ * visibility relationships); there was simply no screen that listed it, and
+ * for a Staff user, who has no Browse screen, no way to navigate to it at all.
+ *
+ * Harmless while delegation was something managers did on screens built for
+ * managers. Cross-department requesting makes it the common case: you ask a
+ * colleague in another team for a spreadsheet and then cannot see whether it
+ * has been done.
+ *
+ * ── This grants nothing ──────────────────────────────────────────────────
+ * Every task here is one the caller could already open by URL. Like
+ * `fetchMyOpenTasks`, the predicate is a relationship to the CALLER — tasks
+ * they created — so it cannot return anyone else's work however the caller's
+ * role is configured. That is what makes it safe to skip `visibleTaskFilter`
+ * here, exactly as the function above skips it.
+ *
+ * ── Deliberately NOT counted in the workload figures ─────────────────────
+ * The hours and counts at the top of the screen are what YOU have to do.
+ * Adding work you delegated would count the same task on two people's plates
+ * and inflate the very number the leaf-task rule exists to keep honest.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+async function fetchDelegatedTasks(user: ActingUser) {
+  const created = await prisma.task.findMany({
+    where: {
+      deletedAt: null,
+      status: { in: [...OPEN_STATUSES] },
+      createdById: user.id,
+    },
+    select: listSelect,
+    orderBy: [{ dueDate: "asc" }, { id: "asc" }],
+  });
+
+  // Filtered here rather than in the query. Excluding "tasks where I am the
+  // assignee OR reviewer OR a contributor" in SQL means negating a comparison
+  // against a NULLABLE column, and `NOT (reviewer_id = 42)` is NULL — not
+  // true — for every task with no reviewer, which would silently drop them.
+  // The set is small (open tasks you created), so filtering in code is both
+  // cheaper to reason about and obviously correct.
+  return created.filter(
+    (t) =>
+      t.assigneeId !== user.id &&
+      t.reviewerId !== user.id &&
+      !t.contributors.some((c) => c.userId === user.id)
+  );
 }
 
 /**
@@ -169,6 +229,14 @@ function bandFor(task: MyWorkTask, userId: bigint, now: Date, weekEnd: Date): Ba
 
 export interface MyWorkSummary {
   bands: { band: Band; tasks: MyWorkTask[] }[];
+  /**
+   * Open work you created that is now somebody else's to do.
+   *
+   * Kept out of `bands` on purpose. The bands are a priority order for what
+   * YOU should act on this morning; work you are waiting on belongs beside
+   * that list, not inside it. It is also absent from every figure in `counts`.
+   */
+  requested: MyWorkTask[];
   counts: {
     total: number;
     overdue: number;
@@ -183,7 +251,10 @@ export interface MyWorkSummary {
 }
 
 export async function getMyWork(user: ActingUser): Promise<MyWorkSummary> {
-  const tasks = await fetchMyOpenTasks(user);
+  const [tasks, requested] = await Promise.all([
+    fetchMyOpenTasks(user),
+    fetchDelegatedTasks(user),
+  ]);
   const now = today();
   const weekEnd = daysFromToday(7);
 
@@ -221,7 +292,11 @@ export async function getMyWork(user: ActingUser): Promise<MyWorkSummary> {
     bands: BAND_ORDER.map((band) => ({ band, tasks: grouped.get(band)! })).filter(
       (g) => g.tasks.length > 0
     ),
+    requested,
     counts: {
+      // `tasks`, not `tasks + requested`. "8 open tasks" has to mean eight
+      // things you have to do; counting work you handed to someone else makes
+      // the headline figure describe nobody's day.
       total: tasks.length,
       overdue: grouped.get("OVERDUE")!.length,
       dueToday: grouped.get("DUE_TODAY")!.length,

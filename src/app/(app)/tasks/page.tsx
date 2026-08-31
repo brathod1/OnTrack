@@ -44,7 +44,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function MyWorkPage() {
   const actor = await requireActingUser();
-  const [{ bands, counts }, createOptions, terms] = await Promise.all([
+  const [{ bands, counts, requested }, createOptions, terms] = await Promise.all([
     getMyWork(actor),
     getCreateOptions(actor),
     getTerminology(),
@@ -106,7 +106,7 @@ export default async function MyWorkPage() {
         )}
       </div>
 
-      {bands.length === 0 ? (
+      {bands.length === 0 && requested.length === 0 ? (
         <EmptyState />
       ) : (
         <div className="mt-6 space-y-6">
@@ -128,10 +128,64 @@ export default async function MyWorkPage() {
               </ul>
             </section>
           ))}
+
+          {/* BELOW the bands, and separated from them, because this is not
+              your to-do list. Above it is what you must do; this is what you
+              are waiting on. Mixed into the priority order it would compete
+              with your own overdue work for attention it has not earned —
+              somebody else is already accountable for every row here. */}
+          {requested.length > 0 && (
+            <section className="border-t border-slate-200 pt-6">
+              <h2 className="mb-1 flex items-baseline gap-2 text-sm font-semibold text-slate-700">
+                Waiting on someone else
+                <span className="tabular text-xs font-normal text-slate-400">
+                  {requested.length}
+                </span>
+              </h2>
+              <p className="mb-2 text-xs text-slate-500">
+                Work you asked for. Not counted in your own workload above.
+              </p>
+              <ul className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                {requested.map((task) => (
+                  <TaskRow
+                    key={task.displayKey}
+                    task={task}
+                    currentUserId={actor.id}
+                    externalLabel={labels.externalDeadline}
+                  />
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
       )}
     </main>
   );
+}
+
+/**
+ * Why someone else's task is on your screen, and who has it.
+ *
+ * Checked in the order the relationships actually override one another:
+ * reviewing or contributing is an active job on the task and outranks having
+ * asked for it, so somebody who created a task AND reviews it is told the
+ * thing they have to act on.
+ *
+ * The requester case reads "waiting on Divya Menon" rather than following the
+ * "<relationship> · <name>" shape of the other two. That shape works when the
+ * name is plainly the person doing the work — "you review · Divya Menon" — and
+ * breaks when it isn't: "you asked for this · Divya Menon" was read on the
+ * real screen as DIVYA having asked, which is the exact opposite of the truth.
+ * A phrase that names the person inside it cannot be parsed backwards.
+ */
+function relationshipLabel(task: MyWorkTask, currentUserId: bigint): string {
+  const who = task.assignee.name;
+  if (task.reviewerId === currentUserId) return `you review · ${who}`;
+  if (task.contributors.some((c) => c.userId === currentUserId)) {
+    return `you contribute · ${who}`;
+  }
+  if (task.createdById === currentUserId) return `waiting on ${who}`;
+  return `you contribute · ${who}`;
 }
 
 function Metric({ label, value, tone }: { label: string; value: number; tone?: string }) {
@@ -215,14 +269,17 @@ function TaskRow({
             )}
 
             {/* Why this task is on your screen, when it isn't yours. Without
-                it, a reviewer wonders why someone else's work is in their list. */}
+                it, a reviewer wonders why someone else's work is in their list.
+
+                Three reasons, not two. "You contribute" was the catch-all for
+                anything that was not yours and not yours to review, which was
+                true until requested work reached this screen — a requester
+                contributes nothing, and telling them they do misdescribes what
+                they may actually DO with the row. */}
             {!mine && (
               <>
                 <span aria-hidden="true">·</span>
-                <span className="italic">
-                  {task.reviewerId === currentUserId ? "you review" : "you contribute"} ·{" "}
-                  {task.assignee.name}
-                </span>
+                <span className="italic">{relationshipLabel(task, currentUserId)}</span>
               </>
             )}
           </div>
