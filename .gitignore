@@ -73,6 +73,11 @@ pnpm-debug.log*
 .vscode/*
 !.vscode/extensions.json
 !.vscode/launch.json
+# Claude Code's local tooling config. Machine-specific and auto-generated —
+# the launch.json it writes defaults to port 3000, while this project serves
+# on 3100, so committing it would hand the next person a config that silently
+# points at the wrong place.
+.claude/
 
 # ── OS ─────────────────────────────────────────────────────────────────────
 Thumbs.db
