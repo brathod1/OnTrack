@@ -316,7 +316,21 @@ export function canManageTask(user: ActingUser, task: TaskWriteContext): boolean
     task.engagementPartnerId === user.id ||
     task.engagementManagerId === user.id ||
     user.reportChainIds.includes(task.assigneeId) ||
-    user.engagementIds.includes(task.engagementId)
+    // `visibleEngagementIds`, not `engagementIds` — STAFFED onto the engagement,
+    // not merely handed one job on it.
+    //
+    // Being asked for help is not a promotion. An OBSERVER membership is written
+    // automatically whenever somebody is assigned work on an engagement they do
+    // not belong to, and while it stayed in this check a single request turned
+    // the recipient into a manager of that work: a senior asked for four hours
+    // of help could reassign the task elsewhere, move its deadline, change its
+    // priority or cancel it — on an engagement run by somebody else, which they
+    // could not even read.
+    //
+    // Narrower than the read filter it borrows from, and deliberately so: this
+    // is the same set that grants engagement-wide READ, and directing work
+    // needs at least the standing that seeing it does.
+    user.visibleEngagementIds.includes(task.engagementId)
   );
 }
 
@@ -469,6 +483,15 @@ export function canCreateTask(user: ActingUser, eng: EngagementCreateContext): b
   if (isOrgAdmin(user)) return true;
   if (eng.partnerId === user.id || eng.managerId === user.id) return true;
 
+  // `engagementIds`, INCLUDING observers — deliberately, and unlike
+  // `canManageTask`, which was narrowed to `visibleEngagementIds`.
+  //
+  // The asymmetry is the point. Directing somebody else's work is authority
+  // and an observer has none. Writing down a task is not: a specialist
+  // borrowed for one job who needs to raise "waiting on source data from the
+  // client" against the same engagement is doing something useful, and they
+  // still see only what they created or were given. If this ever looks like an
+  // oversight, it is not — see canManageTask.
   if (!user.engagementIds.includes(eng.engagementId)) return false;
 
   // Someone who can direct work can always record it. The team's

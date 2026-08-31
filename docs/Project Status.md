@@ -168,7 +168,8 @@ What IT needs to create: a single-tenant app registration, redirect URI `/api/au
 - Four unused dependencies (`lucide-react`, `clsx`, `class-variance-authority`, `tailwind-merge`) to remove before deployment
 - Historical team reports follow the *current* reporting line, not the line as at the time
 - **A manager sees work their staff requested only where they already have a relationship to it.** There is no "created by someone who reports to me" visibility rule. Raised and deliberately not acted on — it would widen the permission model
-- **A Staff member assigning work to a Senior attaches that Senior to the engagement**, and `canManageTask` still reads all memberships regardless of capacity — so that Senior can then direct every task on it. Pre-existing, unchanged by the observer work, and the one place the old over-grant survives. Open decision
+- ~~A Staff member assigning work to a Senior lets that Senior direct the engagement~~ — **closed 31 August 2026.** `canManageTask` now reads `visibleEngagementIds`, so an observer directs nothing. The claim as first written here also overstated it: management is gated by visibility, and after the observer change the recipient could not see the engagement's other work, so the reach was one task rather than all of them. Corrected rather than quietly deleted, because the wrong version was committed and someone may have read it
+- **An observer can still CREATE tasks on an engagement they cannot read.** `canCreateTask` deliberately still reads `engagementIds`. Writing down a task is not authority over anyone, and a specialist borrowed for one job may legitimately need to raise a related one against the same engagement. Recorded so the asymmetry with `canManageTask` reads as a decision rather than an oversight
 
 ---
 

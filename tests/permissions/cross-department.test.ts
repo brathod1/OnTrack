@@ -368,3 +368,186 @@ describe("requesting work confers no authority over it", () => {
     expect(after).toEqual(before);
   });
 });
+
+/**
+ * Being asked for help is not a promotion.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * THE DEFECT THESE PIN: when assignment started writing OBSERVER, the READ
+ * filter learned to ignore it and `canManageTask` did not. So a single request
+ * still turned the recipient into a manager of that work — a senior asked for
+ * four hours of help could reassign the task elsewhere, move its deadline,
+ * change its priority or cancel it, on an engagement run by somebody else that
+ * they could not even read.
+ *
+ * Never a disclosure: the read fix held, and they could still reach only the
+ * one task they were given. But directing work is authority, and nobody had
+ * given them any.
+ *
+ * The second half of this block matters as much as the first. Narrowing a
+ * permission is easy to get wrong in the other direction, and a manager who
+ * quietly loses the ability to run their own engagement is a worse bug than
+ * the one being fixed. Every legitimate route into `canManageTask` — engagement
+ * partner, engagement manager, real membership, line management — is pinned
+ * here alongside the case being removed.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+describe("an observer directs nothing", () => {
+  /**
+   * Nikhil manages EngA2 and has nothing to do with EngA1. Eshan, a Staff
+   * member on EngA1, asks him for help there — which is the whole workflow
+   * this suite exists for, and which must not hand him the engagement.
+   */
+  async function askNikhilForHelp() {
+    return createTask(
+      actor.eshan!,
+      createTaskSchema.parse({
+        title: "Second opinion on the depreciation schedule",
+        engagementId: firm.engagements.a1.toString(),
+        assigneeId: firm.users.nikhil.toString(),
+        dueDate: "2026-12-31",
+      })
+    );
+  }
+
+  it("holds task.assign, and still cannot redirect the work he was given", async () => {
+    const task = await askNikhilForHelp();
+    const nikhil = await reload(firm.users.nikhil);
+
+    // The capability is there. It is the RELATIONSHIP that is missing, which
+    // is the entire capability-plus-relationship model in one assertion.
+    expect(nikhil.capabilities.has("task.assign")).toBe(true);
+
+    await expect(
+      assignTask(nikhil, task.id, {
+        expectedVersion: await versionOf(task.id),
+        assigneeId: firm.users.esha,
+      })
+    ).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("cannot move its deadline or change its priority", async () => {
+    const task = await askNikhilForHelp();
+
+    await expect(
+      updateTask(await reload(firm.users.nikhil), task.id, {
+        expectedVersion: await versionOf(task.id),
+        dueDate: new Date("2027-03-31T00:00:00.000Z"),
+        reason: "rescheduling",
+      })
+    ).rejects.toBeInstanceOf(ForbiddenError);
+
+    await expect(
+      updateTask(await reload(firm.users.nikhil), task.id, {
+        expectedVersion: await versionOf(task.id),
+        priority: "CRITICAL",
+      })
+    ).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("cannot cancel it", async () => {
+    const task = await askNikhilForHelp();
+
+    await expect(
+      transitionTask(await reload(firm.users.nikhil), task.id, {
+        expectedVersion: await versionOf(task.id),
+        to: TaskStatus.CANCELLED,
+        reason: "not needed",
+      })
+    ).rejects.toBeInstanceOf(InvalidOperationError);
+  });
+
+  it("CAN still do the work — this narrows authority, not participation", async () => {
+    // The failure mode of over-correcting: the person you asked for help can no
+    // longer help. He owns the task; he must be able to run it.
+    const task = await askNikhilForHelp();
+
+    const moved = await transitionTask(await reload(firm.users.nikhil), task.id, {
+      expectedVersion: await versionOf(task.id),
+      to: TaskStatus.IN_PROGRESS,
+    });
+    expect(moved.task.status).toBe(TaskStatus.IN_PROGRESS);
+
+    const comment = await addComment(await reload(firm.users.nikhil), task.id, {
+      bodyMd: "Looks right. One rate looks like it is on the old schedule.",
+    });
+    expect(comment.author.id).toBe(firm.users.nikhil);
+  });
+
+  it("and still sees none of the engagement he was borrowed onto", async () => {
+    await askNikhilForHelp();
+
+    const keys = await visibleKeys(await reload(firm.users.nikhil));
+    expect(keys).not.toContain("TSK-TEST-0001");
+    expect(keys).not.toContain("TSK-TEST-0002");
+    expect(keys).not.toContain("TSK-TEST-0006");
+  });
+});
+
+/**
+ * The other direction: nobody legitimate lost anything.
+ *
+ * Narrowing `canManageTask` risks a quieter and worse bug than the one it
+ * fixes — a manager who can no longer run their own engagement, discovered by
+ * a partner on a deadline rather than by a test.
+ */
+describe("real standing is untouched", () => {
+  it("the engagement MANAGER still directs the work", async () => {
+    const task = await requestWorkFromEllie(); // on EngA1, which Meera manages
+
+    const reassigned = await assignTask(actor.meera!, task.id, {
+      expectedVersion: await versionOf(task.id),
+      assigneeId: firm.users.esha,
+    });
+    expect(reassigned.assigneeId).toBe(firm.users.esha);
+  });
+
+  it("the engagement PARTNER still directs the work", async () => {
+    const task = await requestWorkFromEllie(); // EngA1's partner is Priya
+
+    const reassigned = await assignTask(actor.priya!, task.id, {
+      expectedVersion: await versionOf(task.id),
+      assigneeId: firm.users.esha,
+    });
+    expect(reassigned.assigneeId).toBe(firm.users.esha);
+  });
+
+  it("a REAL engagement member with task.assign still directs the work", async () => {
+    // Meera's membership of EngA1 is a fixture MANAGER row, not an observer
+    // one. The distinction is the whole fix, so it is asserted rather than
+    // assumed.
+    const membership = await capacityOn(firm.engagements.a1, firm.users.meera);
+    expect(membership?.capacity).toBe(EngagementCapacity.MANAGER);
+    expect(actor.meera!.visibleEngagementIds).toContain(firm.engagements.a1);
+  });
+
+  it("a LINE MANAGER still directs their report's work on someone else's engagement", async () => {
+    // Nikhil manages Ellie. This is the cross-team case the visibility model
+    // was built for, and it must survive a change aimed at observers.
+    const task = await createTask(
+      actor.meera!,
+      createTaskSchema.parse({
+        title: "Vouch the additions",
+        engagementId: firm.engagements.a1.toString(),
+        assigneeId: firm.users.ellie.toString(),
+        dueDate: "2026-12-31",
+      })
+    );
+
+    const reassigned = await assignTask(await reload(firm.users.nikhil), task.id, {
+      expectedVersion: await versionOf(task.id),
+      assigneeId: firm.users.esha,
+    });
+    expect(reassigned.assigneeId).toBe(firm.users.esha);
+  });
+
+  it("an administrator still directs anything", async () => {
+    const task = await requestWorkFromEllie();
+
+    const reassigned = await assignTask(actor.admin!, task.id, {
+      expectedVersion: await versionOf(task.id),
+      assigneeId: firm.users.esha,
+    });
+    expect(reassigned.assigneeId).toBe(firm.users.esha);
+  });
+});
