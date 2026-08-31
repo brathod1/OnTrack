@@ -196,6 +196,20 @@ export default async function BrowsePage({
                       </span>
                       <span aria-hidden="true">·</span>
                       <span className="truncate">{task.assignee.name}</span>
+                      {/* Shown only when somebody ELSE asked for it. Suppressed
+                          when the assignee created their own task (nobody asked
+                          them) and when YOU did (you already know) — otherwise
+                          the one case worth noticing, a request that crossed
+                          teams, is buried in a name on every row. */}
+                      {task.createdBy.id !== task.assigneeId &&
+                        task.createdBy.id !== actor.id && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="truncate italic">
+                              asked by {task.createdBy.name}
+                            </span>
+                          </>
+                        )}
                     </div>
                   </div>
 

@@ -293,6 +293,13 @@ function RiskPanel({
                   </span>
                   <span className="block truncate text-xs text-slate-500">
                     {r.clientName} · {r.assigneeName}
+                    {/* Only when somebody ELSE put this on their plate — see
+                        RiskRow.requestedByName. Without it a row shows who is
+                        doing the work and never who pulled them in, which is
+                        the whole question when a request crosses teams. */}
+                    {r.requestedByName && (
+                      <span className="italic"> · asked by {r.requestedByName}</span>
+                    )}
                     {r.isStatutory && (
                       <span
                         className="ml-1.5 font-medium text-orange-700"

@@ -61,6 +61,10 @@ const dashboardSelect = {
   updatedAt: true,
   assigneeId: true,
   assignee: { select: { id: true, name: true } },
+  // Who asked for the work. A row naming only the assignee cannot show that
+  // somebody in another team pulled this person in — see `requestedByName`.
+  createdById: true,
+  createdBy: { select: { id: true, name: true } },
   parentTaskId: true,
   // Needed for the leaf-only rule. A parent's estimate and its children's
   // describe the same work; summing both double-counts it, which is a bug
@@ -83,6 +87,22 @@ export interface RiskRow {
   title: string;
   clientName: string;
   assigneeName: string;
+  /**
+   * Who asked for this, when that is worth saying — otherwise null.
+   *
+   * ─────────────────────────────────────────────────────────────────────────
+   * Null in the two cases where a name would be noise rather than news:
+   * the assignee created their own task (nobody asked them), and YOU created
+   * it (you already know). What survives is the case this field exists for —
+   * work somebody ELSE put on this person's plate, which on a manager's screen
+   * is how a cross-department request becomes visible at a glance instead of
+   * only by opening the task.
+   *
+   * A name here is never new information: the reader could already open the
+   * task and read the same thing. This saves the click, and nothing more.
+   * ─────────────────────────────────────────────────────────────────────────
+   */
+  requestedByName: string | null;
   dueDate: Date;
   /** Days late, or days stalled, depending on the bucket. */
   days: number;
@@ -142,13 +162,17 @@ function remainingOf(t: DashboardTask): number {
   return Math.max(0, t.currentEstimateMinutes - t.actualMinutes);
 }
 
-function toRow(t: DashboardTask, days: number): RiskRow {
+function toRow(t: DashboardTask, days: number, viewerId: bigint): RiskRow {
   return {
     id: t.id.toString(),
     key: t.displayKey,
     title: t.title,
     clientName: t.engagement.client.name,
     assigneeName: t.assignee.name,
+    requestedByName:
+      t.createdById === t.assigneeId || t.createdById === viewerId
+        ? null
+        : t.createdBy.name,
     dueDate: t.dueDate,
     days,
     // A statutory deadline cannot be renegotiated with the client, which is
@@ -183,9 +207,9 @@ export async function getDashboard(user: ActingUser): Promise<Dashboard> {
 
   for (const t of tasks) {
     if (t.dueDate < today) {
-      overdue.push(toRow(t, daysBetween(t.dueDate, today)));
+      overdue.push(toRow(t, daysBetween(t.dueDate, today), user.id));
     } else if (t.dueDate <= weekOut) {
-      dueThisWeek.push(toRow(t, daysBetween(today, t.dueDate)));
+      dueThisWeek.push(toRow(t, daysBetween(today, t.dueDate), user.id));
     }
 
     // Blocked and stalled-in-review are counted SEPARATELY from the date
@@ -193,14 +217,14 @@ export async function getDashboard(user: ActingUser): Promise<Dashboard> {
     // and hiding it from one list because it appears in another is how the
     // most urgent item becomes the least visible.
     if (t.isBlocked && t.blockedSince && t.blockedSince < stallCutoff) {
-      stalledBlocked.push(toRow(t, daysBetween(t.blockedSince, new Date())));
+      stalledBlocked.push(toRow(t, daysBetween(t.blockedSince, new Date()), user.id));
     }
 
     if (t.status === TaskStatus.REVIEW && t.updatedAt < stallCutoff) {
       // updatedAt is a proxy for "entered review" and will overstate freshness
       // if someone edits the task while it waits. Good enough to surface a
       // queue nobody is serving; not good enough to quote in a report.
-      stalledReview.push(toRow(t, daysBetween(t.updatedAt, new Date())));
+      stalledReview.push(toRow(t, daysBetween(t.updatedAt, new Date()), user.id));
     }
   }
 

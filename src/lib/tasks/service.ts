@@ -63,6 +63,9 @@ const taskWithContext = {
   // whose each one is. Carrying only assigneeId meant each caller resolved
   // names itself, which is a join per caller instead of one here.
   assignee: { select: { id: true, name: true } },
+  // Who asked for the work. Browse rows named only the assignee, so a request
+  // that crossed teams looked identical to work someone picked up themselves.
+  createdBy: { select: { id: true, name: true } },
   contributors: { select: { userId: true } },
   _count: { select: { subtasks: { where: { status: { notIn: ["COMPLETED", "CANCELLED"] } } } } },
 } satisfies Prisma.TaskInclude;

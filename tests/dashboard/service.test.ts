@@ -299,3 +299,69 @@ describe("what each client is absorbing", () => {
     expect(d.clients.find((c) => c.code === "ALPHA")!.overdue).toBe(1);
   });
 });
+
+/**
+ * "Asked by" on a risk row.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * A row named only the assignee, so cross-department work looked exactly like
+ * work someone had picked up themselves. A manager glancing at the dashboard
+ * could not tell that one of their people had pulled a colleague in from
+ * another team — the fact was in the database and on the task page, and
+ * nowhere they would actually look.
+ *
+ * DISCLOSES NOTHING NEW. Every row here is already visible through
+ * `visibleTaskFilter`, and the creator's name is already on the task page.
+ * This saves a click; it does not widen scope, which is why these tests assert
+ * on the LABEL and the scope tests above still own the question of what
+ * appears at all.
+ *
+ * The suppression rules carry as much weight as the label. A name on every row
+ * would bury the one row that matters.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+describe("who asked for the work", () => {
+  /** Fixture t1: EngA1, created by Meera, assigned to Eshan, due far out. */
+  const t1Row = (d: Awaited<ReturnType<typeof getDashboard>>) =>
+    [...d.overdue, ...d.dueThisWeek].find((r) => r.key === "TSK-TEST-0001");
+
+  it("names the requester when somebody else asked", async () => {
+    await setDue(firm.tasks.t1, 2);
+
+    // Priya is the engagement partner: she sees the work, and she did not
+    // create it. This is the case the field exists for.
+    const row = t1Row(await getDashboard(actor.priya!));
+    expect(row?.assigneeName).toBe("Eshan Exec");
+    expect(row?.requestedByName).toBe("Meera Manager");
+  });
+
+  it("says nothing when you are the one who asked", async () => {
+    await setDue(firm.tasks.t1, 2);
+
+    // Meera created it. Repeating her own name on every row she delegated is
+    // how the one row somebody else asked for stops standing out.
+    const row = t1Row(await getDashboard(actor.meera!));
+    expect(row?.requestedByName).toBeNull();
+  });
+
+  it("says nothing when the assignee created their own task", async () => {
+    // Nobody asked them. "Asked by Meera Manager" on Meera's own task would
+    // be true and useless.
+    await setDue(firm.tasks.t2, 2); // EngA1, created by Meera, assigned to Meera
+
+    const row = [...(await getDashboard(actor.priya!)).dueThisWeek].find(
+      (r) => r.key === "TSK-TEST-0002"
+    );
+    expect(row?.assigneeName).toBe("Meera Manager");
+    expect(row?.requestedByName).toBeNull();
+  });
+
+  it("carries the label on overdue rows too, not only this week's", async () => {
+    await setDue(firm.tasks.t1, -4);
+
+    const d = await getDashboard(actor.priya!);
+    expect(d.overdue.find((r) => r.key === "TSK-TEST-0001")?.requestedByName).toBe(
+      "Meera Manager"
+    );
+  });
+});
