@@ -162,7 +162,7 @@ What IT needs to create: a single-tenant app registration, redirect URI `/api/au
 
 ## 6. Technical debt
 
-- `package.json#prisma` is deprecated; must move to `prisma.config.ts` before Prisma 7
+- ~~`package.json#prisma` is deprecated; must move to `prisma.config.ts` before Prisma 7~~ — **done 31 August 2026.** A config file makes the CLI stop loading `.env`, so `prisma.config.ts` calls `process.loadEnvFile()`; without it every Prisma command fails with P1012. Needs Node 20.12+, so `engines.node` moved from `>=20.11.0`
 - Test fixtures rebuild per test; batching the inserts would cut most of that. The full suite runs in about three minutes
 - `npm run db:test` shells out to `psql -U postgres` and prompts for a password, so it cannot run unattended or in CI
 - 7 npm audit findings in transitive dependencies, for Stage 16

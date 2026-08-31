@@ -280,11 +280,13 @@ verifiable. A failure in one is then unambiguous.
   `createMany` calls should cut it by most of that. The full suite now runs in
   about three minutes.
 
-- **`package.json#prisma` is deprecated.** Prisma 6.19 warns that the `prisma.seed`
-  key moves to a `prisma.config.ts` file and is removed in Prisma 7. It works on
-  6.x. Deliberately not migrated yet — the config file also changes how the
-  schema and `.env` are located, and that risk isn't worth taking to silence a
-  warning. **Must be resolved before upgrading to Prisma 7.**
+- ~~**`package.json#prisma` is deprecated.**~~ **Resolved 31 August 2026** —
+  moved to `prisma.config.ts`. The caution recorded here was right: a config
+  file makes the CLI stop loading `.env` ("Prisma config detected, skipping
+  environment variable loading"), and without `process.loadEnvFile()` in it,
+  every Prisma command fails with P1012. That one line is why `engines.node`
+  is now `>=20.12.0`. Read the comments in `prisma.config.ts` before changing
+  it — particularly the note on why it does not break `db:test`.
 
 - **7 npm audit findings** (3 moderate, 4 high) at time of install, all in
   transitive dependencies. To be reviewed properly at Stage 16 hardening.

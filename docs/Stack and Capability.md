@@ -203,8 +203,8 @@ reports and Excel export (Stage 15), and the nav links that used to 404 —
 
 ## Technical debt
 
-- `package.json#prisma` is deprecated; must move to `prisma.config.ts` before Prisma 7
-- Four unused dependencies to remove before deployment
+- ~~`package.json#prisma` is deprecated; must move to `prisma.config.ts` before Prisma 7~~ — **done 31 August 2026.** Moved to `prisma.config.ts`, which must call `process.loadEnvFile()`: a config file makes the CLI stop loading `.env`, and without it every Prisma command fails with P1012. Needs Node 20.12+
+- ~~Four unused dependencies to remove before deployment~~ — **done 31 August 2026.** Removed; see "Declared but not yet used" above
 - Test fixtures rebuild per test (~35s for the largest suite); batching the inserts would cut most of it
 - 7 npm audit findings in transitive dependencies, for Stage 16
 - Historical team reports would follow the *current* reporting line, not the line as at the time
