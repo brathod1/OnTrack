@@ -73,19 +73,23 @@ Test files run **sequentially, not in parallel** — they share one physical dat
 
 ## Declared but not yet used
 
-Six dependencies are in `package.json` and appear **nowhere in `src/`**. Each is supply-chain surface and something somebody has to keep patched, so they are listed rather than left to be discovered. (`exceljs` was on this list until Stage 15 and has been struck through below.)
+Two dependencies are in `package.json` and appear **nowhere in `src/`**. Each is supply-chain surface and something somebody has to keep patched, so they are listed rather than left to be discovered. (`exceljs` was on this list until Stage 15 and has been struck through below.)
 
 | Package | Intended for | Status |
 |---|---|---|
 | `pg-boss` | Job queue | Stage 12 decided in-app notifications need no queue — they are written in the same transaction as the change that causes them. It will earn its place when **email** is built, which needs retries against an external service |
 | ~~`exceljs`~~ | Spreadsheet export | **Now in use** — the time report's two-sheet workbook |
 | `@azure/storage-blob` | Attachments | Schema exists; the Azure wiring does not |
-| `lucide-react` | Icons | Never used — the two icons in the product are hand-written inline SVG. One glyph does not justify a package |
-| `clsx` | Class name joining | Template literals have covered every case so far |
-| `class-variance-authority` | Component variants | No component library was built, so nothing needed variants |
-| `tailwind-merge` | Class conflict resolution | Only needed when composing classes from several sources, which the current components do not do |
 
-**Recommendation:** remove `lucide-react`, `clsx`, `class-variance-authority` and `tailwind-merge` before deployment — four packages carrying no weight. Keep `pg-boss`, `exceljs` and `@azure/storage-blob`, which are scheduled for named stages.
+**Removed 31 August 2026:** `lucide-react`, `clsx`, `class-variance-authority`
+and `tailwind-merge` — four packages carried for a component library that was
+never built. The product's two icons are hand-written inline SVG and its class
+names are plain template literals, so nothing referenced any of them; the
+production build and all 403 tests passed unchanged after removal. Note that
+`clsx` was also a dependency *of* `class-variance-authority`, so removing it
+alone would have left it installed.
+
+`pg-boss` and `@azure/storage-blob` are kept, both scheduled for named stages.
 
 ## What we deliberately did NOT use
 

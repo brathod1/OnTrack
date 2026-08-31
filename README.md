@@ -290,10 +290,11 @@ verifiable. A failure in one is then unambiguous.
   transitive dependencies. To be reviewed properly at Stage 16 hardening.
   `npm audit fix --force` is not the answer — it performs major-version upgrades.
 
-- **Four unused dependencies.** `lucide-react`, `clsx`, `class-variance-authority`
-  and `tailwind-merge` appear nowhere in `src/`. Should be removed before
-  deployment. `pg-boss` and `@azure/storage-blob` are also unused but are held
-  for named future stages (email queue, attachments).
+- **Two unused dependencies remain.** `pg-boss` and `@azure/storage-blob` appear
+  nowhere in `src/`, but are held for named future stages (email queue,
+  attachments). The four that were being carried for a component library that
+  was never built — `lucide-react`, `clsx`, `class-variance-authority` and
+  `tailwind-merge` — have been removed.
 
 - **Historical team reports follow the current reporting line**, not the line as
   at the time. Accepted for this phase.
