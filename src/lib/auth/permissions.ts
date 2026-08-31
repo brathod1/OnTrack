@@ -207,6 +207,30 @@ export function visibleTaskFilter(user: ActingUser): Prisma.TaskWhereInput {
 }
 
 /**
+ * Does `visibleTaskFilter` restrict this user to a subset of the tasks, or not?
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * GRANTS NOTHING. Asks a question about the filter above and returns a
+ * boolean — the kernel describing itself, so callers do not have to infer it.
+ *
+ * It exists because a caller that has to enumerate the visible set (search
+ * does, see `searchTaskIds`) can skip that work entirely when the answer is
+ * "all of them". Without this, the search would materialise every task id in
+ * the firm on every administrator's query to reach a result identical to the
+ * one it gets by not bothering.
+ *
+ * ⚠ NOT a permission check, and never a substitute for one. It answers "would
+ * scoping narrow anything", not "may this person do X". A caller that skips
+ * the scope on the strength of this must still compose `visibleTaskFilter`
+ * into the query it finally runs — which is what makes the shortcut safe: the
+ * kernel remains in the path either way.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+export function hasUnrestrictedTaskVisibility(user: ActingUser): boolean {
+  return can(user, CAP.VIEW_ALL_TASKS);
+}
+
+/**
  * Row check for fetch-by-id. Throws NotFoundError — never ForbiddenError —
  * so a probing user cannot distinguish "exists but forbidden" from "absent".
  */

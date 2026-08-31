@@ -16,6 +16,7 @@ import {
   canManageTask,
   canWriteField,
   ForbiddenError,
+  hasUnrestrictedTaskVisibility,
   NotFoundError,
   visibleTaskFilter,
   type ActingUser,
@@ -707,15 +708,47 @@ export async function getTaskByKey(user: ActingUser, displayKey: string) {
  * "filed". It is configuration rather than a literal because a firm operating
  * in another language should not need a code change.
  *
- * CAPPED. Search narrows a list that is then filtered further and paginated;
- * it is not itself the pagination. A cap keeps the `IN` clause sane.
+ * ─────────────────────────────────────────────────────────────────────────
+ * CAPPED — AND THE CAP IS APPLIED INSIDE THE CALLER'S SCOPE, NOT OUTSIDE IT.
+ *
+ * This is the whole point of the `scopeIds` parameter, and it was a real
+ * defect before it existed. The query used to run across every task in the
+ * firm, rank the matches, and keep the top 500; `listTasks` then intersected
+ * that with `visibleTaskFilter`. So the cap was spent on rows the caller was
+ * never allowed to see.
+ *
+ * The consequence was silent and got worse with data volume: once more than
+ * 500 tasks matched a common term, the top 500 firm-wide could contain none of
+ * the searcher's own work, and their task simply vanished from the results
+ * with nothing to indicate it had been dropped. Never a disclosure — the
+ * kernel still filtered what came back — but a staff member searching "GSTR"
+ * could get an empty page for a task assigned to them.
+ *
+ * `scopeIds` is the id set the caller has ALREADY resolved through the
+ * permission kernel. This function does not decide who may see what and must
+ * never learn how to: it narrows a set it is handed. `null` means "no
+ * narrowing needed", which the caller uses only when the kernel says the
+ * user's visibility is unrestricted.
  * ─────────────────────────────────────────────────────────────────────────
  */
-async function searchTaskIds(query: string, language: string): Promise<bigint[]> {
+async function searchTaskIds(
+  query: string,
+  language: string,
+  /** Ids the caller may see, already resolved by the kernel. `null` = all. */
+  scopeIds: bigint[] | null
+): Promise<bigint[]> {
+  // `= ANY($1::bigint[])` rather than an expanded `IN (...)` list: one bind
+  // parameter instead of one per id, so a wide scope cannot walk into
+  // PostgreSQL's 65,535-parameter ceiling.
+  const inScope = scopeIds === null
+    ? Prisma.sql`TRUE`
+    : Prisma.sql`id = ANY(${scopeIds}::bigint[])`;
+
   const rows = await prisma.$queryRaw<{ id: bigint }[]>`
     SELECT id
       FROM tasks
-     WHERE search_vector @@ websearch_to_tsquery(${language}::regconfig, ${query})
+     WHERE ${inScope}
+       AND search_vector @@ websearch_to_tsquery(${language}::regconfig, ${query})
        AND deleted_at IS NULL
      ORDER BY ts_rank(search_vector, websearch_to_tsquery(${language}::regconfig, ${query})) DESC
      LIMIT 500
@@ -758,9 +791,35 @@ export async function listTasks(user: ActingUser, filters: ListTasksInput) {
   }
 
   if (filters.search) {
+    // ── Search runs LAST, inside the scope every other clause has built ─────
+    //
+    // Placement is the fix, not decoration. `where` already holds
+    // `visibleTaskFilter` and every other filter, so resolving the scope here
+    // means the search's 500-row cap is spent on rows this caller would
+    // actually have received. Resolving it earlier would reinstate the defect.
+    //
+    // The scope query is the KERNEL'S OWN predicate, run as-is. No visibility
+    // rule is restated here, and none should ever be: if the union of
+    // relationships changes in permissions.ts, this picks it up for free.
+    //
+    // `where` holds exactly one clause when nothing narrows: `visibleTaskFilter`
+    // is pushed first and every other filter pushes onto it. Combined with an
+    // unrestricted user, that means enumerating the scope would cost a full
+    // scan to arrive at the same answer. `visibleTaskFilter` is still composed
+    // into the query below — the kernel stays in the path; only the redundant
+    // work is skipped.
+    const nothingNarrowsTheScope =
+      hasUnrestrictedTaskVisibility(user) && where.length === 1;
+
+    const scopeIds = nothingNarrowsTheScope
+      ? null
+      : await prisma.task
+          .findMany({ where: { AND: where }, select: { id: true } })
+          .then((rows) => rows.map((r) => r.id));
+
     // Previously declared in the schema and silently ignored here — a caller
     // asking for "GSTR" received everything and had no way to know.
-    const ids = await searchTaskIds(filters.search, org.searchLanguage);
+    const ids = await searchTaskIds(filters.search, org.searchLanguage, scopeIds);
 
     // No matches must mean NO RESULTS. An empty `in: []` is what Prisma needs
     // to say that; omitting the clause entirely would hand back the unfiltered

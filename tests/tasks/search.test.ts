@@ -122,6 +122,127 @@ describe("free-text search", () => {
   });
 });
 
+/**
+ * The relevance cap must not eat someone's own work.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * THE DEFECT THESE TESTS EXIST FOR: `searchTaskIds` used to run across every
+ * task in the firm, rank the matches, keep the top 500, and only THEN let
+ * `listTasks` intersect the result with `visibleTaskFilter`. The cap was spent
+ * before anyone's scope was considered.
+ *
+ * Never a disclosure — the kernel still filtered what came back. But once more
+ * than 500 tasks matched a common term, the top 500 firm-wide could contain
+ * none of the searcher's own, and their task vanished with nothing to say it
+ * had been dropped. A member searching "GSTR" got an empty page for a task
+ * assigned to them.
+ *
+ * Invisible at fixture volumes, certain at real ones — which is why these
+ * tests build past the cap instead of asserting on six rows.
+ *
+ * WHY THE RANKING IS DETERMINISTIC, and not a tie-break the planner may
+ * reorder between runs: the search vector weights the title 'A' and the
+ * description 'D'. Measured against PostgreSQL, a term in the title ranks
+ * 0.6079 and the same term in the description alone ranks 0.0608 — an order of
+ * magnitude apart. So the bulk tasks, which carry the term in their TITLE,
+ * always outrank Chandra's, which carries it only in its DESCRIPTION.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+describe("search does not lose visible work behind the relevance cap", () => {
+  /** Nonsense, so nothing in the fixture firm can match it by accident. */
+  const RARE = "zephyrous";
+  /** Past the 500-row cap in searchTaskIds, with room to spare. */
+  const BULK = 506;
+  const DUE = new Date("2026-09-30T00:00:00.000Z");
+
+  /**
+   * Tasks Chandra has no relationship to, with the term in the TITLE so they
+   * rank above hers. Created outside the service on purpose: `createTask`
+   * would add people to engagements, which is the one thing that would give
+   * her a relationship and quietly destroy the test.
+   */
+  async function seedInvisibleMatches() {
+    await prisma.task.createMany({
+      data: Array.from({ length: BULK }, (_, i) => ({
+        displayKey: `TSK-BULK-${String(i + 1).padStart(5, "0")}`,
+        title: `${RARE} bulk filing ${i + 1}`,
+        engagementId: firm.engagements.a1,
+        createdById: firm.users.meera,
+        assignedById: firm.users.meera,
+        assigneeId: firm.users.meera,
+        dueDate: DUE,
+        reviewRequired: false,
+        currentEstimateMinutes: 60,
+      })),
+    });
+  }
+
+  /** One task Chandra IS the assignee of — her only relationship in the firm. */
+  async function seedChandrasMatch() {
+    return prisma.task.create({
+      data: {
+        displayKey: "TSK-MINE-00001",
+        title: "Ordinary compliance work",
+        description: `Mentions ${RARE} exactly once, in the description.`,
+        engagementId: firm.engagements.a1,
+        createdById: firm.users.meera,
+        assignedById: firm.users.meera,
+        assigneeId: firm.users.chandra,
+        dueDate: DUE,
+        reviewRequired: false,
+      },
+    });
+  }
+
+  it("finds a visible match that ranks below 500 invisible ones", async () => {
+    await seedInvisibleMatches();
+    const mine = await seedChandrasMatch();
+
+    // ── Prove the pre-condition before asserting the fix ──────────────────
+    // This is the OLD query, verbatim: firm-wide, ranked, capped. If it ever
+    // stops excluding her task the fixture has drifted below the cap and this
+    // test would start passing for the wrong reason.
+    const unscoped = await prisma.$queryRaw<{ id: bigint }[]>`
+      SELECT id
+        FROM tasks
+       WHERE search_vector @@ websearch_to_tsquery('english'::regconfig, ${RARE})
+         AND deleted_at IS NULL
+       ORDER BY ts_rank(search_vector, websearch_to_tsquery('english'::regconfig, ${RARE})) DESC
+       LIMIT 500
+    `;
+    expect(unscoped).toHaveLength(500);
+    expect(unscoped.map((r) => r.id)).not.toContain(mine.id);
+
+    // ── The fix: her task comes back anyway, because the cap is now spent
+    //    inside her scope rather than the firm's ──────────────────────────
+    const found = await listTasks(actor.chandra!, filters({ search: RARE }));
+    expect(keys(found)).toEqual(["TSK-MINE-00001"]);
+  });
+
+  it("still returns nothing when every match is someone else's", async () => {
+    // The guard against the wrong fix. Removing the cap, or widening the
+    // scope, would also make the test above pass — and would hand Chandra 506
+    // tasks she has no business seeing.
+    await seedInvisibleMatches();
+
+    const found = await listTasks(actor.chandra!, filters({ search: RARE }));
+    expect(found.tasks).toHaveLength(0);
+  });
+
+  it("skips the scope query for an unrestricted user without changing what they get", async () => {
+    // Covers the other branch: an administrator holds VIEW_ALL_TASKS, so
+    // `hasUnrestrictedTaskVisibility` short-circuits the id enumeration. The
+    // result must be identical to computing the scope the long way.
+    await seedInvisibleMatches();
+
+    const found = await listTasks(actor.admin!, filters({ search: RARE, limit: 200 }));
+
+    expect(found.tasks).toHaveLength(200); // a page, not the scope
+    expect(found.nextCursor).not.toBeNull();
+    expect(keys(found)).toContain("TSK-BULK-00001");
+  });
+});
+
 describe("the overdue filter", () => {
   it("uses the organisation's day, not the server's", async () => {
     // A task due YESTERDAY in the organisation's timezone is overdue, whatever
