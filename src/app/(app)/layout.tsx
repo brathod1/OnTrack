@@ -7,6 +7,7 @@ import { signOut } from "@/lib/auth/auth";
 import { HeaderTimer } from "@/components/header-timer";
 import { getRunningTimer } from "@/lib/time/service";
 import { NotificationPanel } from "@/components/notification-panel";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { countUnread } from "@/lib/notifications/service";
 
 export const runtime = "nodejs";
@@ -69,6 +70,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen">
+      {/* Mounted here rather than per page: the layout is shared, so one
+          instance keeps every screen inside the app current — and because a
+          refresh re-renders this layout, the unread count on the bell updates
+          with it. Renders nothing. */}
+      <AutoRefresh />
+
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center gap-6 px-4 sm:px-6">
           <Link href="/tasks" className="py-3 text-base font-semibold tracking-tight">
